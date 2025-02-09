@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useWallet } from '../contexts/WalletContext';
 import { Plus, Pencil, Trash2, AlertTriangle, PiggyBank } from 'lucide-react';
 import { format, parseISO, startOfDay, endOfDay, lastDayOfMonth, startOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
@@ -11,6 +12,8 @@ interface Budget {
   id: string;
   category: string;
   limit: number;
+  userId: string;
+  walletId: string;
 }
 
 interface BudgetSummary {
@@ -31,6 +34,7 @@ interface Transaction {
 
 export default function Budget() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,17 +45,23 @@ export default function Budget() {
   });
 
   useEffect(() => {
-    if (user) {
-      fetchBudgets();
-      fetchTransactions();
+    if (user && currentWallet) {
+      Promise.all([
+        fetchBudgets(),
+        fetchTransactions()
+      ]);
     }
-  }, [user]);
+  }, [user, currentWallet]);
 
   const fetchBudgets = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
     
     const budgetsRef = collection(db, 'budgets');
-    const q = query(budgetsRef, where('userId', '==', user.uid));
+    const q = query(
+      budgetsRef, 
+      where('userId', '==', user.uid),
+      where('walletId', '==', currentWallet.id)
+    );
     const snapshot = await getDocs(q);
     
     setBudgets(snapshot.docs.map(doc => ({
@@ -85,12 +95,13 @@ export default function Budget() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !currentWallet) return;
     
     const budget = {
       category: formData.category,
       limit: Number(formData.limit.replace(/\D/g, '')) / 100,
       userId: user.uid,
+      walletId: currentWallet.id
     };
 
     if (editingBudget) {
@@ -149,9 +160,21 @@ export default function Budget() {
   };
 
   const handleCurrencyInput = (value: string) => {
+    // Remover tudo que não é número
+    const numericValue = value.replace(/\D/g, '');
+    
+    // Converter para número e dividir por 100 para considerar centavos
+    const floatValue = Number(numericValue) / 100;
+    
+    // Formatar com Intl.NumberFormat
+    const formattedValue = new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(floatValue);
+
     setFormData(prev => ({
       ...prev,
-      limit: formatCurrencyInput(value)
+      limit: formattedValue
     }));
   };
 
@@ -292,14 +315,21 @@ export default function Budget() {
                 <label className="block text-sm font-medium text-gray-700">
                   Limite Mensal
                 </label>
+                <div className="relative mt-1">
+
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500">
+                    R$
+                  </span>
                 <input
                   type="text"
                   value={formData.limit}
                   onChange={(e) => handleCurrencyInput(e.target.value)}
-                  className="mt-1 block w-full rounded-md border-gray-300"
+                  className="pl-8 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
               </div>
+              </div>
+
               <div className="flex justify-end space-x-3">
                 <button
                   type="button"

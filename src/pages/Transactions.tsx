@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, getDocs, addDoc, updateDoc, deleteDoc, doc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useWallet } from '../contexts/WalletContext';
 import { Plus, Pencil, Trash2, ArrowUpCircle, ArrowDownCircle, Receipt } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
@@ -13,10 +14,13 @@ interface Transaction {
   date: Date;
   type: 'income' | 'expense';
   category: string;
+  userId: string;
+  walletId: string;
 }
 
 export default function Transactions() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -31,16 +35,20 @@ export default function Transactions() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) {
+    if (user && currentWallet) {
       fetchTransactions();
     }
-  }, [user]);
+  }, [user, currentWallet]);
 
   const fetchTransactions = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     const transactionsRef = collection(db, 'transactions');
-    const q = query(transactionsRef, where('userId', '==', user.uid));
+    const q = query(
+      transactionsRef, 
+      where('userId', '==', user.uid),
+      where('walletId', '==', currentWallet.id)
+    );
     const querySnapshot = await getDocs(q);
     
     const transactionsData = querySnapshot.docs.map(doc => ({
@@ -74,7 +82,7 @@ export default function Transactions() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     try {
       const amount = Number(formData.amount.replace(/\D/g, '')) / 100;
@@ -91,20 +99,21 @@ export default function Transactions() {
         0
       );
 
-      const transaction = {
+      const newTransaction = {
         description: formData.description,
         amount,
         type: formData.type,
         category: formData.category,
         date,
-        userId: user.uid
+        userId: user.uid,
+        walletId: currentWallet.id
       };
 
       if (editingTransaction) {
         const transactionRef = doc(db, 'transactions', editingTransaction.id);
-        await updateDoc(transactionRef, transaction);
+        await updateDoc(transactionRef, newTransaction);
       } else {
-        await addDoc(collection(db, 'transactions'), transaction);
+        await addDoc(collection(db, 'transactions'), newTransaction);
       }
 
       setIsModalOpen(false);

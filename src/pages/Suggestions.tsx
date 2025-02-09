@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Lightbulb as LightBulb, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
+import { useWallet } from '../contexts/WalletContext';
 
 interface Transaction {
   amount: number;
@@ -23,17 +24,18 @@ interface CategoryAnalysis {
 
 export default function Suggestions() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [categoryAnalysis, setCategoryAnalysis] = useState<CategoryAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) {
+    if (user && currentWallet) {
       analyzeCategoryTrends();
     }
-  }, [user]);
+  }, [user, currentWallet]);
 
   const analyzeCategoryTrends = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     const currentDate = new Date();
     const currentMonth = {
@@ -50,7 +52,7 @@ export default function Suggestions() {
     const q = query(
       transactionsRef,
       where('userId', '==', user.uid),
-      where('type', '==', 'expense')
+      where('walletId', '==', currentWallet.id)
     );
     
     const querySnapshot = await getDocs(q);

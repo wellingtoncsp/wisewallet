@@ -14,6 +14,7 @@ import {
   LogOut,
   Wallet
 } from 'lucide-react';
+import { WalletSelector } from './WalletSelector';
 
 const menuItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -51,19 +52,21 @@ export default function Layout({ children }: LayoutProps) {
         <div className="flex flex-col h-full">
           {/* Logo/Header */}
           <div className="p-4 border-b">
-            <div className="flex items-center">
-              <div className="flex items-center space-x-2">
-                <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-2 rounded-lg">
-                  <Wallet className="h-6 w-6 text-white" />
-                </div>
-                <div className="flex flex-col">
-                  <div className="flex items-center">
-                    <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-500 bg-clip-text text-transparent">
-                      Wise
-                    </span>
-                    <span className="text-2xl font-bold text-gray-700">Wallet</span>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center">
+                <div className="flex items-center space-x-2">
+                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-2 rounded-lg">
+                    <Wallet className="h-6 w-6 text-white" />
                   </div>
-                  <span className="text-xs text-gray-500">Gestão Financeira Inteligente</span>
+                  <div className="flex flex-col">
+                    <div className="flex items-center">
+                      <span className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-blue-500 bg-clip-text text-transparent">
+                        Wise
+                      </span>
+                      <span className="text-2xl font-bold text-gray-700">Wallet</span>
+                    </div>
+                    <span className="text-xs text-gray-500">Gestão Financeira Inteligente</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -91,6 +94,7 @@ export default function Layout({ children }: LayoutProps) {
               );
             })}
           </nav>
+          <WalletSelector />
 
           {/* User Profile & Logout */}
           <div className="p-4 border-t">

@@ -13,6 +13,7 @@ import Profile from './pages/Profile';
 import Family from './pages/Family';
 import Suggestions from './pages/Suggestions';
 import Reports from './pages/Reports';
+import { WalletProvider } from './contexts/WalletContext';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -27,100 +28,102 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Dashboard />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/transactions"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Transactions />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/goals"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Goals />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/budget"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Budget />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/charts"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Charts />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/suggestions"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Suggestions />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/family"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Family />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Profile />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/reports"
-            element={
-              <PrivateRoute>
-                <Layout>
-                  <Reports />
-                </Layout>
-              </PrivateRoute>
-            }
-          />
-        </Routes>
+        <WalletProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Dashboard />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/transactions"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Transactions />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/goals"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Goals />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/budget"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Budget />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/charts"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Charts />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/suggestions"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Suggestions />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/family"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Family />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Profile />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <PrivateRoute>
+                  <Layout>
+                    <Reports />
+                  </Layout>
+                </PrivateRoute>
+              }
+            />
+          </Routes>
+        </WalletProvider>
       </AuthProvider>
     </Router>
   );

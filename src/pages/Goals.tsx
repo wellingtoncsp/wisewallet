@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, getDocs, addDoc, updateDoc, deleteDoc, doc, where, Timestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useWallet } from '../contexts/WalletContext';
 import { Plus, Pencil, Trash2, Target, Check, Trophy } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -13,7 +14,7 @@ interface Goal {
   priority: number;
   deadline: Date;
   completed: boolean;
-  completedAt: Date;
+  completedAt: Timestamp;
 }
 
 interface Transaction {
@@ -23,6 +24,7 @@ interface Transaction {
 
 export default function Goals() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [currentBalance, setCurrentBalance] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,12 +41,14 @@ export default function Goals() {
   const [shouldCreateTransaction, setShouldCreateTransaction] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      fetchGoals();
-      fetchCompletedGoals();
-      calculateCurrentBalance();
+    if (user && currentWallet) {
+      Promise.all([
+        fetchGoals(),
+        fetchCompletedGoals(),
+        calculateCurrentBalance()
+      ]);
     }
-  }, [user]);
+  }, [user, currentWallet]);
 
   const calculateCurrentBalance = async () => {
     if (!user) return;
@@ -72,7 +76,7 @@ export default function Goals() {
     const goalsData = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      deadline: doc.data().deadline.toDate()
+      deadline: new Date(doc.data().deadline.seconds * 1000)
     })) as Goal[];
 
     // Ordenar primeiro por prioridade (1 a 3) e depois por valor (menor para maior)
@@ -103,7 +107,7 @@ export default function Goals() {
     const completedGoals = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      deadline: doc.data().deadline.toDate()
+      deadline: new Date(doc.data().deadline.seconds * 1000)
     })) as Goal[];
 
     setCompletedGoals(completedGoals);
@@ -256,7 +260,7 @@ export default function Goals() {
       
       await updateDoc(goalRef, {
         completed: true,
-        completedAt: now
+        completedAt: Timestamp.fromDate(now)
       });
 
       if (shouldCreateTransaction) {

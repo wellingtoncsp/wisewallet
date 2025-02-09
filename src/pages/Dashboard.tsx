@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useWallet } from '../contexts/WalletContext';
 import { 
   ArrowUpCircle, 
   ArrowDownCircle, 
@@ -28,6 +29,8 @@ interface Transaction {
   date: Date;
   description: string;
   category: string;
+  userId: string;
+  walletId: string;
 }
 
 interface Goal {
@@ -37,16 +40,21 @@ interface Goal {
   deadline: Date;
   priority: number;
   userId: string;
+  walletId: string;
   completed?: boolean;
 }
 
 interface Budget {
+  id: string;
   category: string;
   limit: number;
+  userId: string;
+  walletId: string;
 }
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [monthlyIncome, setMonthlyIncome] = useState(0);
   const [monthlyExpenses, setMonthlyExpenses] = useState(0);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -73,21 +81,40 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchTransactions();
-      fetchGoals();
-      fetchUpcomingBills();
-      fetchBudgets();
+    if (user && currentWallet) {
+      loadDashboardData();
     }
-  }, [user]);
+  }, [user, currentWallet]);
+
+  useEffect(() => {
+    const handleWalletChange = () => {
+      loadDashboardData();
+    };
+
+    window.addEventListener('walletChanged', handleWalletChange);
+    return () => window.removeEventListener('walletChanged', handleWalletChange);
+  }, []);
+
+  const loadDashboardData = async () => {
+    await Promise.all([
+      fetchTransactions(),
+      fetchGoals(),
+      fetchBudgets(),
+      fetchUpcomingBills()
+    ]);
+  };
 
   const fetchTransactions = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     try {
       // Buscar todas as transações do usuário
       const transactionsRef = collection(db, 'transactions');
-      const q = query(transactionsRef, where('userId', '==', user.uid));
+      const q = query(
+        transactionsRef, 
+        where('userId', '==', user.uid),
+        where('walletId', '==', currentWallet.id)
+      );
       const querySnapshot = await getDocs(q);
       
       const transactions = querySnapshot.docs.map(doc => ({
@@ -157,11 +184,15 @@ export default function Dashboard() {
   };
 
   const fetchGoals = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     try {
       const goalsRef = collection(db, 'goals');
-      const q = query(goalsRef, where('userId', '==', user.uid));
+      const q = query(
+        goalsRef, 
+        where('userId', '==', user.uid),
+        where('walletId', '==', currentWallet.id)
+      );
       
       const querySnapshot = await getDocs(q);
       
@@ -231,11 +262,15 @@ export default function Dashboard() {
   };
 
   const fetchBudgets = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     try {
       const budgetsRef = collection(db, 'budgets');
-      const q = query(budgetsRef, where('userId', '==', user.uid));
+      const q = query(
+        budgetsRef, 
+        where('userId', '==', user.uid),
+        where('walletId', '==', currentWallet.id)
+      );
       
       const querySnapshot = await getDocs(q);
       const budgetsData = querySnapshot.docs.map(doc => ({
@@ -377,8 +412,6 @@ export default function Dashboard() {
               Ver todos
             </Link>
           </div>
-
-
 
           <div className="space-y-4">
             {budgets.map(budget => {

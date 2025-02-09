@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useWallet } from '../contexts/WalletContext';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
@@ -28,6 +29,7 @@ interface CategoryData {
 
 export default function Charts() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [trendData, setTrendData] = useState<MonthlyData[]>([]);
   const [categoryData, setCategoryData] = useState<CategoryData[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState('6');
@@ -36,13 +38,13 @@ export default function Charts() {
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#ff0000', '#00ff00', '#0000ff'];
 
   useEffect(() => {
-    if (user) {
-      fetchTransactionData();
+    if (user && currentWallet) {
+      fetchTransactions();
     }
-  }, [user, selectedPeriod]);
+  }, [user, currentWallet]);
 
-  const fetchTransactionData = async () => {
-    if (!user) return;
+  const fetchTransactions = async () => {
+    if (!user || !currentWallet) return;
 
     const months = Number(selectedPeriod);
     const lastMonths = Array.from({ length: months }, (_, i) => {
@@ -57,7 +59,8 @@ export default function Charts() {
     const transactionsRef = collection(db, 'transactions');
     const q = query(
       transactionsRef,
-      where('userId', '==', user.uid)
+      where('userId', '==', user.uid),
+      where('walletId', '==', currentWallet.id)
     );
 
     const querySnapshot = await getDocs(q);

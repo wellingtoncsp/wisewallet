@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { User, Lock, Users, UserPlus, X } from 'lucide-react';
+import { User, Lock, Users, UserPlus, X, Wallet, Plus, Edit2, Trash2 } from 'lucide-react';
 import { collection, query, where, getDocs, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FamilyMember } from '../types/user';
+import { useWallet } from '../contexts/WalletContext';
 
 export default function Profile() {
   const { userProfile, updateUserProfile, updateUserPassword } = useAuth();
@@ -25,6 +26,11 @@ export default function Profile() {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const { wallets, createWallet, updateWallet, deleteWallet, currentWallet } = useWallet();
+  const [isCreating, setIsCreating] = useState(false);
+  const [newWalletName, setNewWalletName] = useState('');
+  const [editingName, setEditingName] = useState('');
 
   useEffect(() => {
     if (userProfile?.familyId) {
@@ -178,8 +184,44 @@ export default function Profile() {
     }
   };
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    
+    try {
+      await createWallet(newWalletName);
+      setNewWalletName('');
+      setIsCreating(false);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Erro ao criar carteira');
+    }
+  };
+
+  const handleUpdate = async (id: string) => {
+    setError('');
+    
+    try {
+      await updateWallet(id, editingName);
+      setIsEditing(null);
+      setEditingName('');
+    } catch (error) {
+      setError('Erro ao atualizar carteira');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta carteira?')) return;
+    
+    setError('');
+    try {
+      await deleteWallet(id);
+    } catch (error) {
+      setError('Erro ao excluir carteira');
+    }
+  };
+
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 max-w-4xl mx-auto space-y-6">
       <h1 className="text-3xl font-bold text-gray-900 mb-8">Perfil do Usuário</h1>
 
       {error && (
@@ -484,6 +526,176 @@ export default function Profile() {
           </div>
         </div>
       )}
+
+      <WalletManagement />
+    </div>
+  );
+}
+
+function WalletManagement() {
+  const { wallets, createWallet, updateWallet, deleteWallet, currentWallet } = useWallet();
+  const [isCreating, setIsCreating] = useState(false);
+  const [isEditing, setIsEditing] = useState<string | null>(null);
+  const [newWalletName, setNewWalletName] = useState('');
+  const [editingName, setEditingName] = useState('');
+  const [error, setError] = useState('');
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    
+    try {
+      await createWallet(newWalletName);
+      setNewWalletName('');
+      setIsCreating(false);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Erro ao criar carteira');
+    }
+  };
+
+  const handleUpdate = async (id: string) => {
+    setError('');
+    
+    try {
+      await updateWallet(id, editingName);
+      setIsEditing(null);
+      setEditingName('');
+    } catch (error) {
+      setError('Erro ao atualizar carteira');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta carteira?')) return;
+    
+    setError('');
+    try {
+      await deleteWallet(id);
+    } catch (error) {
+      setError('Erro ao excluir carteira');
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <h2 className="text-xl font-semibold mb-4 flex items-center">
+        <Wallet className="h-6 w-6 mr-2 text-blue-500" />
+        Gerenciar Carteiras
+      </h2>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
+          {error}
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {wallets.map(wallet => (
+          <div key={wallet.id} className="flex items-center justify-between p-3 border rounded-lg">
+            {isEditing === wallet.id ? (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUpdate(wallet.id);
+                }}
+                className="flex-1 flex items-center"
+              >
+                <input
+                  type="text"
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  className="flex-1 mr-2 px-2 py-1 border rounded"
+                  placeholder="Nome da carteira"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 mr-2"
+                >
+                  Salvar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditing(null);
+                    setEditingName('');
+                  }}
+                  className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+              </form>
+            ) : (
+              <>
+                <div className="flex items-center">
+                  <span className="font-medium">{wallet.name}</span>
+                  {currentWallet?.id === wallet.id && (
+                    <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                      Atual
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => {
+                      setIsEditing(wallet.id);
+                      setEditingName(wallet.name);
+                    }}
+                    className="p-1 text-gray-600 hover:text-blue-600"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                  {wallets.length > 1 && (
+                    <button
+                      onClick={() => handleDelete(wallet.id)}
+                      className="p-1 text-gray-600 hover:text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+
+        {wallets.length < 3 && !isCreating ? (
+          <button
+            onClick={() => setIsCreating(true)}
+            className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-500 flex items-center justify-center"
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Adicionar Carteira
+          </button>
+        ) : isCreating && (
+          <form onSubmit={handleCreate} className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={newWalletName}
+              onChange={(e) => setNewWalletName(e.target.value)}
+              className="flex-1 px-3 py-2 border rounded"
+              placeholder="Nome da nova carteira"
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Criar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreating(false);
+                setNewWalletName('');
+              }}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+            >
+              Cancelar
+            </button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }

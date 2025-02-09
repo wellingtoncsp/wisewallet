@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useWallet } from '../contexts/WalletContext';
 import { 
   BarChart2, 
   TrendingUp, 
@@ -55,6 +56,7 @@ declare module 'jspdf' {
 
 export default function Reports() {
   const { user } = useAuth();
+  const { currentWallet } = useWallet();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('1');
@@ -77,10 +79,10 @@ export default function Reports() {
   };
 
   useEffect(() => {
-    if (user) {
+    if (user && currentWallet) {
       fetchData();
     }
-  }, [user, dateRange]);
+  }, [user, currentWallet, dateRange]);
 
   const fetchData = async () => {
     await Promise.all([
@@ -90,10 +92,14 @@ export default function Reports() {
   };
 
   const fetchTransactions = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     const transactionsRef = collection(db, 'transactions');
-    const q = query(transactionsRef, where('userId', '==', user.uid));
+    const q = query(
+      transactionsRef, 
+      where('userId', '==', user.uid),
+      where('walletId', '==', currentWallet.id)
+    );
     const querySnapshot = await getDocs(q);
     
     const fetchedTransactions = querySnapshot.docs.map(doc => ({
@@ -106,10 +112,14 @@ export default function Reports() {
   };
 
   const fetchGoals = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     const goalsRef = collection(db, 'goals');
-    const q = query(goalsRef, where('userId', '==', user.uid));
+    const q = query(
+      goalsRef, 
+      where('userId', '==', user.uid),
+      where('walletId', '==', currentWallet.id)
+    );
     const querySnapshot = await getDocs(q);
     
     const fetchedGoals = querySnapshot.docs.map(doc => ({
@@ -672,7 +682,7 @@ export default function Reports() {
         startDate = startOfMonth(subMonths(today, 11));
         break;
       case 'all': // Todos
-        startDate = new Date('2000-01-01'); // Data muito antiga
+        startDate = new Date('2000-01-01');
         break;
       default:
         startDate = today;
