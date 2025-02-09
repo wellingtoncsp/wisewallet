@@ -1,0 +1,1 @@
+// Este arquivo não é mais necessário pois estamos usando Firebase
