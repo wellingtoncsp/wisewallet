@@ -24,7 +24,7 @@ const menuItems = [
   { path: '/charts', icon: BarChart2, label: 'Gráficos' },
   { path: '/reports', icon: FileText, label: 'Relatórios' },
   { path: '/suggestions', icon: Lightbulb, label: 'Sugestões' },
-  { path: '/family', icon: Users, label: 'Família' }
+  { path: '/family', icon: Users, label: 'Compartilhamento' }
 ];
 
 interface LayoutProps {
