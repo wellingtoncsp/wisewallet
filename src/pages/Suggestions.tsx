@@ -6,6 +6,8 @@ import { Lightbulb as LightBulb, TrendingUp, TrendingDown, AlertTriangle } from 
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
 import { useWallet } from '../contexts/WalletContext';
+import { useAlerts } from '../contexts/AlertContext';
+import { useFormatCurrency } from '../utils/formatCurrency';
 
 interface Transaction {
   amount: number;
@@ -27,12 +29,41 @@ export default function Suggestions() {
   const { currentWallet } = useWallet();
   const [categoryAnalysis, setCategoryAnalysis] = useState<CategoryAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
+  const { createAlert } = useAlerts();
+  const formatCurrency = useFormatCurrency();
 
   useEffect(() => {
     if (user && currentWallet) {
       analyzeCategoryTrends();
     }
   }, [user, currentWallet]);
+
+  useEffect(() => {
+    const generateSavingTips = async () => {
+      const tips = [
+        "Que tal criar um cofrinho virtual? Arredonde suas despesas e guarde a diferença! 🐷",
+        "Já pensou em fazer um 'No Spend Day' por semana? Escolha um dia para não gastar nada! 💪",
+        "Anote TODOS os seus gastos por uma semana. Você vai se surpreender! 📝",
+        "Compare preços online antes de comprar. Pode economizar muito! 🔍",
+        "Planeje suas refeições da semana. Evita desperdício e economiza! 🥗"
+      ];
+
+      const randomTip = tips[Math.floor(Math.random() * tips.length)];
+      
+      await createAlert('saving_tip', {
+        message: randomTip,
+        tipId: Date.now()
+      });
+    };
+
+    const lastTipTime = localStorage.getItem('lastTipTime');
+    const now = Date.now();
+    
+    if (!lastTipTime || now - Number(lastTipTime) >= 24 * 60 * 60 * 1000) {
+      generateSavingTips();
+      localStorage.setItem('lastTipTime', now.toString());
+    }
+  }, []);
 
   const analyzeCategoryTrends = async () => {
     if (!user || !currentWallet) return;
@@ -110,13 +141,6 @@ export default function Suggestions() {
     
     setCategoryAnalysis(analysis);
     setLoading(false);
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
   };
 
   const getSuggestion = (analysis: CategoryAnalysis) => {

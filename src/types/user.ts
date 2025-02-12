@@ -5,7 +5,9 @@ export interface UserProfile {
   birthDate: string;
   cpf?: string;
   gender?: 'male' | 'female' | 'other' | '';
+  currency: 'BRL' | 'USD' | 'EUR' | 'GBP';
   createdAt: Date;
+  updatedAt: Date;
   familyId?: string;
   isHeadOfFamily?: boolean;
 }

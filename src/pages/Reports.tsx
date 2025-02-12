@@ -3,6 +3,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useFormatCurrency } from '../utils/formatCurrency';
 import { 
   BarChart2, 
   TrendingUp, 
@@ -70,13 +71,7 @@ export default function Reports() {
     };
   });
   const [selectedReport, setSelectedReport] = useState<string>('income-expense');
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
-  };
+  const formatCurrency = useFormatCurrency();
 
   useEffect(() => {
     if (user && currentWallet) {
@@ -85,19 +80,11 @@ export default function Reports() {
   }, [user, currentWallet, dateRange]);
 
   const fetchData = async () => {
-    await Promise.all([
-      fetchTransactions(),
-      fetchGoals()
-    ]);
-  };
-
-  const fetchTransactions = async () => {
     if (!user || !currentWallet) return;
 
     const transactionsRef = collection(db, 'transactions');
     const q = query(
-      transactionsRef, 
-      where('userId', '==', user.uid),
+      transactionsRef,
       where('walletId', '==', currentWallet.id)
     );
     const querySnapshot = await getDocs(q);
@@ -109,20 +96,15 @@ export default function Reports() {
     })) as Transaction[];
 
     setTransactions(fetchedTransactions);
-  };
-
-  const fetchGoals = async () => {
-    if (!user || !currentWallet) return;
 
     const goalsRef = collection(db, 'goals');
-    const q = query(
+    const goalsQuery = query(
       goalsRef, 
-      where('userId', '==', user.uid),
       where('walletId', '==', currentWallet.id)
     );
-    const querySnapshot = await getDocs(q);
+    const goalsSnapshot = await getDocs(goalsQuery);
     
-    const fetchedGoals = querySnapshot.docs.map(doc => ({
+    const fetchedGoals = goalsSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
       deadline: doc.data().deadline.toDate()

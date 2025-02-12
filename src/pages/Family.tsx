@@ -1,7 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 import { Users,  X, Share2, Check } from 'lucide-react';
 import { useWallet } from '../contexts/WalletContext';
+
+interface SharedByUser {
+  name: string;
+  email: string;
+}
+
+interface ShareData {
+  id: string;
+  sharedByUser: SharedByUser;
+  sharedByUserId: string;
+  sharedWithEmail: string;
+  walletId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+}
 
 export default function Family() {
   const { 
@@ -25,6 +39,12 @@ export default function Family() {
   const [selectedWalletId, setSelectedWalletId] = useState('');
   const [email, setEmail] = useState('');
 
+  useEffect(() => {
+    if (pendingShares.length > 0) {
+      console.log('Dados do compartilhamento:', pendingShares);
+    }
+  }, [pendingShares]);
+
   const handleShare = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -34,8 +54,9 @@ export default function Family() {
       setIsModalOpen(false);
       setEmail('');
       setSelectedWalletId('');
+      setSuccess('Oba! Convite enviado com sucesso! 🎉 Agora é só aguardar a resposta do seu amigo!');
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Erro ao compartilhar carteira');
+      setError(error instanceof Error ? error.message : 'Ops! Algo deu errado ao compartilhar a carteira 😅');
     }
   };
 
@@ -61,28 +82,39 @@ export default function Family() {
       {/* Notificações de compartilhamento pendente */}
       {pendingShares.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h3 className="text-xl font-semibold text-gray-900 mb-4">Compartilhamentos Pendentes</h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-4">
+            <span className="mr-2">��</span>
+            Convites Pendentes
+          </h3>
           <div className="space-y-4">
             {pendingShares.map(share => (
               <div key={share.id} className="border-b last:border-0 pb-4 last:pb-0">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-gray-900">Nova solicitação de compartilhamento</p>
+                    <p className="font-medium text-gray-900">
+                      Hey! Você recebeu um convite especial! ✨
+                    </p>
                     <p className="text-sm text-gray-600">
-                      De: {share.sharedByUser?.name || 'Usuário'} ({share.sharedByUser?.email})
+                      <strong>{share.sharedByUser?.name}</strong> ({share.sharedByUser?.email}) 
+                      quer compartilhar uma carteira com você!
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Carteira: <strong>
+                        {wallets.find(w => w.id === share.walletId)?.name || 'Carteira Compartilhada'}
+                      </strong>
                     </p>
                   </div>
                   <div className="flex space-x-2">
                     <button
                       onClick={() => acceptShare(share.id)}
-                      className="flex items-center px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200"
+                      className="flex items-center px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
                     >
                       <Check className="h-4 w-4 mr-2" />
                       Aceitar
                     </button>
                     <button
                       onClick={() => rejectShare(share.id)}
-                      className="flex items-center px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                      className="flex items-center px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
                     >
                       <X className="h-4 w-4 mr-2" />
                       Recusar
@@ -98,7 +130,10 @@ export default function Family() {
       {/* Solicitações Enviadas Pendentes */}
       {sentPendingShares.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h3 className="text-xl font-semibold text-gray-900 mb-4">Solicitações de Compartilhamento Enviadas</h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-4">
+            <span className="mr-2">🚀</span>
+            Convites Enviados
+          </h3>
           <div className="space-y-4">
             {sentPendingShares.map(share => {
               const wallet = wallets.find(w => w.id === share.walletId);
@@ -110,19 +145,20 @@ export default function Family() {
                     <div>
                       <p className="font-medium text-gray-900">{wallet.name}</p>
                       <p className="text-sm text-gray-600">
-                        Aguardando resposta de: {share.sharedWithEmail}
+                        Aguardando resposta de {share.sharedWithEmail}
                       </p>
                       <span className="inline-block px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full mt-1">
-                        Pendente
+                        ⏳ Pendente
                       </span>
                     </div>
                     <button
                       onClick={() => {
-                        if (confirm(`Deseja cancelar o compartilhamento com ${share.sharedWithEmail}?`)) {
+                        if (confirm(`Deseja cancelar o convite enviado para ${share.sharedWithEmail}?`)) {
                           removeShare(share.id);
                         }
                       }}
                       className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                      title="Cancelar convite"
                     >
                       <X className="h-5 w-5" />
                     </button>

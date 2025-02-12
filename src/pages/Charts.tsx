@@ -7,6 +7,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
 import { TrendingUp, PieChart as PieChartIcon, BarChart2 } from 'lucide-react';
+import { useFormatCurrency } from '../utils/formatCurrency';
 
 interface Transaction {
   amount: number;
@@ -34,6 +35,7 @@ export default function Charts() {
   const [categoryData, setCategoryData] = useState<CategoryData[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState('6');
   const [selectedChart, setSelectedChart] = useState<'trend' | 'category' | 'comparison'>('trend');
+  const formatCurrency = useFormatCurrency();
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#ff0000', '#00ff00', '#0000ff'];
 
@@ -59,7 +61,6 @@ export default function Charts() {
     const transactionsRef = collection(db, 'transactions');
     const q = query(
       transactionsRef,
-      where('userId', '==', user.uid),
       where('walletId', '==', currentWallet.id)
     );
 
@@ -112,13 +113,6 @@ export default function Charts() {
       .sort((a, b) => b.amount - a.amount);
 
     setCategoryData(categoryDataArray);
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
   };
 
   return (
@@ -185,7 +179,7 @@ export default function Charts() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis />
-                  <Tooltip
+                  <Tooltip 
                     formatter={(value: number) => formatCurrency(value)}
                     labelStyle={{ color: '#374151' }}
                   />
@@ -236,7 +230,9 @@ export default function Charts() {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Tooltip 
+                    formatter={(value: number) => formatCurrency(value)}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -252,7 +248,9 @@ export default function Charts() {
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="month" />
                   <YAxis />
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Tooltip 
+                    formatter={(value: number) => formatCurrency(value)}
+                  />
                   <Legend />
                   <Bar dataKey="income" name="Receitas" fill="#10B981" />
                   <Bar dataKey="expenses" name="Despesas" fill="#EF4444" />

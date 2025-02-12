@@ -76,32 +76,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     try {
       const userRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userRef);
+      
+      // Atualizar no Firestore
+      await updateDoc(userRef, {
+        ...profile,
+        updatedAt: new Date()
+      });
 
-      if (!userDoc.exists()) {
-        // Se o documento não existir, criar um novo
-        const newUserProfile: UserProfile = {
-          name: user.displayName || '',
-          email: user.email || '',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          ...profile
-        };
-        await setDoc(userRef, newUserProfile);
-        setUserProfile(newUserProfile);
-      } else {
-        // Se existir, atualizar
-        await updateDoc(userRef, {
-          ...profile,
-          updatedAt: new Date()
-        });
+      // Atualizar o estado local
+      const updatedDoc = await getDoc(userRef);
+      const updatedProfile = updatedDoc.data() as UserProfile;
+      setUserProfile(updatedProfile);
 
-        if (profile.name) {
-          await updateProfile(user, { displayName: profile.name });
-        }
-
-        const updatedDoc = await getDoc(userRef);
-        setUserProfile(updatedDoc.data() as UserProfile);
+      // Se o nome foi atualizado, atualizar também no Auth
+      if (profile.name) {
+        await updateProfile(user, { displayName: profile.name });
       }
     } catch (error) {
       console.error('Erro ao atualizar perfil:', error);

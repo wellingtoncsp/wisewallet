@@ -1,15 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
 import { useAuth } from '../contexts/AuthContext';
-import { Wallet } from 'lucide-react';
+import { ChevronDown, Wallet, Users } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
-export function WalletSelector() {
-  const { currentWallet, wallets, setCurrentWallet, sharedWallets } = useWallet();
+export const WalletSelector = () => {
+  const { wallets, currentWallet, setCurrentWallet, sharedWallets, isSharedWallet } = useWallet();
   const { user } = useAuth();
+  const [isOpen, setIsOpen] = useState(false);
 
   console.log('WalletSelector - user:', user?.email);
   console.log('WalletSelector - wallets:', wallets);
-  console.log('WalletSelector - sharedWallets:', sharedWallets);
   console.log('WalletSelector - currentWallet:', currentWallet);
 
   if (wallets.length <= 1) {
@@ -21,34 +22,80 @@ export function WalletSelector() {
   console.log('WalletSelector - ownedWallets:', ownedWallets);
 
   return (
-    <div className="relative">
-      <select
-        value={currentWallet?.id}
-        onChange={(e) => {
-          console.log('WalletSelector - wallet selecionada:', e.target.value);
-          const wallet = wallets.find(w => w.id === e.target.value);
-          if (wallet) setCurrentWallet(wallet);
-        }}
-        className="appearance-none bg-white border border-gray-300 rounded-md pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-      >
-        <optgroup label="Minhas Carteiras">
-          {ownedWallets.map(wallet => (
-            <option key={wallet.id} value={wallet.id}>
-              {wallet.name}
-            </option>
-          ))}
-        </optgroup>
-        {sharedWallets.length > 0 && (
-          <optgroup label="Carteiras Compartilhadas">
-            {sharedWallets.map(wallet => (
-              <option key={wallet.id} value={wallet.id}>
-                {wallet.name} (Compartilhada)
-              </option>
+    <div className="relative p-4 border-t border-gray-200">
+      {/* Menu dropdown - Moved above the button */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="absolute left-4 right-4 bottom-full mb-2 py-2 bg-white rounded-lg shadow-lg z-50"
+          >
+            {/* Carteiras próprias */}
+            <div className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase">
+              Minhas Carteiras
+            </div>
+            {ownedWallets.map(wallet => (
+              <button
+                key={wallet.id}
+                onClick={() => {
+                  setCurrentWallet(wallet);
+                  setIsOpen(false);
+                }}
+                className={`w-full flex items-center px-4 py-2 text-left hover:bg-gray-50 ${
+                  currentWallet?.id === wallet.id ? 'bg-blue-50' : ''
+                }`}
+              >
+                <Wallet className="h-5 w-5 text-blue-500" />
+                <span className="ml-3 text-gray-900">{wallet.name}</span>
+              </button>
             ))}
-          </optgroup>
+
+            {/* Carteiras compartilhadas */}
+            {sharedWallets.length > 0 && (
+              <>
+                <div className="mt-2 px-4 py-1 text-xs font-semibold text-gray-500 uppercase">
+                  Carteiras Compartilhadas
+                </div>
+                {sharedWallets.map(wallet => (
+                  <button
+                    key={wallet.id}
+                    onClick={() => {
+                      setCurrentWallet(wallet);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full flex items-center px-4 py-2 text-left hover:bg-gray-50 ${
+                      currentWallet?.id === wallet.id ? 'bg-purple-50' : ''
+                    }`}
+                  >
+                    <Users className="h-5 w-5 text-purple-500" />
+                    <span className="ml-3 text-gray-900">{wallet.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </motion.div>
         )}
-      </select>
-      <Wallet className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+      </AnimatePresence>
+
+      {/* Botão principal */}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <div className="flex items-center">
+          {currentWallet?.id && isSharedWallet(currentWallet.id) ? (
+            <Users className="h-5 w-5 text-purple-500" />
+          ) : (
+            <Wallet className="h-5 w-5 text-blue-500" />
+          )}
+          <span className="ml-3 font-medium text-gray-900">
+            {currentWallet?.name || 'Selecione uma carteira'}
+          </span>
+        </div>
+        <ChevronDown className={`h-5 w-5 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
     </div>
   );
-} 
+};

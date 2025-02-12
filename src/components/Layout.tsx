@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useAlerts } from '../contexts/AlertContext';
 import { 
   LayoutDashboard, 
   Receipt, 
@@ -12,29 +13,50 @@ import {
   FileText,
   User,
   LogOut,
-  Wallet
+  Wallet,
+  Bell,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { WalletSelector } from './WalletSelector';
-
-const menuItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/transactions', icon: Receipt, label: 'Transações' },
-  { path: '/goals', icon: Target, label: 'Metas' },
-  { path: '/budget', icon: PiggyBank, label: 'Orçamentos' },
-  { path: '/charts', icon: BarChart2, label: 'Gráficos' },
-  { path: '/reports', icon: FileText, label: 'Relatórios' },
-  { path: '/suggestions', icon: Lightbulb, label: 'Sugestões' },
-  { path: '/family', icon: Users, label: 'Compartilhamento' }
-];
+import { AlertBell } from './AlertBell';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
+const NotificationMenuItem = ({ unreadCount }: { unreadCount: number }) => {
+  return (
+    <div className="relative flex items-center w-full">
+      <Bell className="h-5 w-5 mr-3" />
+      <span>Notificações</span>
+      {unreadCount > 0 && (
+        <div className="flex items-center ml-auto">
+          <span className="animate-pulse bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+            {unreadCount} {unreadCount === 1 ? 'nova' : 'novas'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { signOut, userProfile } = useAuth();
+  const { unreadCount } = useAlerts();
+
+  const menuItems = [
+    { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/transactions', icon: Receipt, label: 'Transações' },
+    { path: '/goals', icon: Target, label: 'Metas' },
+    { path: '/budget', icon: PiggyBank, label: 'Orçamentos' },
+    { path: '/charts', icon: BarChart2, label: 'Gráficos' },
+    { path: '/reports', icon: FileText, label: 'Relatórios' },
+    { path: '/suggestions', icon: Lightbulb, label: 'Sugestões' },
+    { path: '/family', icon: Users, label: 'Compartilhamento' }
+  ];
 
   const handleSignOut = async () => {
     try {
@@ -46,10 +68,9 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Sidebar */}
-      <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-sm">
-        <div className="flex flex-col h-full">
+    <div className="flex min-h-screen bg-gray-100">
+      <div className="fixed w-64 h-full">
+        <div className="flex flex-col h-full bg-white border-r border-gray-200">
           {/* Logo/Header */}
           <div className="p-4 border-b">
             <div className="flex items-center space-x-4">
@@ -93,9 +114,23 @@ export default function Layout({ children }: LayoutProps) {
                 </Link>
               );
             })}
-          </nav>
-          <WalletSelector />
 
+            {/* Item especial para notificações */}
+            <Link
+              to="/notifications"
+              className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                location.pathname === '/notifications'
+                  ? 'bg-blue-50 text-blue-700'
+                  : unreadCount > 0
+                  ? 'bg-red-50 text-red-700 animate-pulse-subtle'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <NotificationMenuItem unreadCount={unreadCount} />
+            </Link>
+          </nav>
+      {/* WalletSelector moved here, before notifications */}
+              <WalletSelector />
           {/* User Profile & Logout */}
           <div className="p-4 border-t">
             <Link
@@ -105,6 +140,7 @@ export default function Layout({ children }: LayoutProps) {
               <User className="h-5 w-5 mr-3" />
               {userProfile?.name || 'Perfil'}
             </Link>
+
             <button
               onClick={handleSignOut}
               className="w-full flex items-center px-4 py-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
@@ -117,8 +153,10 @@ export default function Layout({ children }: LayoutProps) {
       </div>
 
       {/* Main Content */}
-      <div className="ml-64">
-        {children}
+      <div className="ml-64 flex-1 p-6">
+        <div className="max-w-7xl mx-auto">
+          {children}
+        </div>
       </div>
     </div>
   );

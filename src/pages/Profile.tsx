@@ -17,7 +17,8 @@ export default function Profile() {
     name: userProfile?.name || '',
     birthDate: userProfile?.birthDate || '',
     cpf: userProfile?.cpf || '',
-    gender: userProfile?.gender || ''
+    gender: (userProfile?.gender || '') as '' | 'male' | 'female' | 'other',
+    currency: userProfile?.currency || 'BRL'
   });
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
@@ -27,14 +28,21 @@ export default function Profile() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const { wallets, createWallet, updateWallet, deleteWallet, currentWallet } = useWallet();
-  const [isCreating, setIsCreating] = useState(false);
-  const [newWalletName, setNewWalletName] = useState('');
-  const [editingName, setEditingName] = useState('');
-
   useEffect(() => {
     if (userProfile?.familyId) {
       fetchFamilyMembers();
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (userProfile) {
+      setFormData({
+        name: userProfile.name || '',
+        birthDate: userProfile.birthDate || '',
+        cpf: userProfile.cpf || '',
+        gender: (userProfile.gender || '') as '' | 'male' | 'female' | 'other',
+        currency: userProfile.currency || 'BRL'
+      });
     }
   }, [userProfile]);
 
@@ -58,7 +66,7 @@ export default function Profile() {
     if (!userProfile?.familyId) {
       // Create new family group if user doesn't have one
       const familyRef = await addDoc(collection(db, 'families'), {
-        createdBy: userProfile?.id,
+        createdBy: userProfile?.uid,
         createdAt: new Date()
       });
 
@@ -70,7 +78,7 @@ export default function Profile() {
       // Add current user as head of family
       await addDoc(collection(db, 'familyMembers'), {
         familyId: familyRef.id,
-        userId: userProfile?.id,
+        userId: userProfile?.uid,
         name: userProfile?.name,
         email: userProfile?.email,
         role: 'head',
@@ -82,7 +90,7 @@ export default function Profile() {
     await addDoc(collection(db, 'familyInvitations'), {
       familyId: userProfile?.familyId,
       email: inviteEmail,
-      invitedBy: userProfile?.id,
+      invitedBy: userProfile?.uid,
       status: 'pending',
       createdAt: new Date()
     });
@@ -113,29 +121,21 @@ export default function Profile() {
     fetchFamilyMembers();
   };
 
-  const formatCPF = (value: string) => {
-    return value
-      .replace(/\D/g, '')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
-      .replace(/(-\d{2})\d+?$/, '$1');
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    
-    if (name === 'cpf') {
-      setFormData(prev => ({
-        ...prev,
-        [name]: formatCPF(value)
-      }));
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'gender' ? 
+        (value as '' | 'male' | 'female' | 'other') : 
+        name === 'cpf' ? 
+          value.replace(/\D/g, '')
+            .replace(/(\d{3})(\d)/, '$1.$2')
+            .replace(/(\d{3})(\d)/, '$1.$2')
+            .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+            .replace(/(-\d{2})\d+?$/, '$1') : 
+          name === 'currency' ? value :
+          value
+    }));
   };
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,11 +152,35 @@ export default function Profile() {
     setSuccess('');
 
     try {
-      await updateUserProfile(formData);
+      if (!formData.name || !formData.birthDate) {
+        setError('Por favor, preencha todos os campos obrigatórios');
+        return;
+      }
+
+      const updateData = {
+        name: formData.name.trim(),
+        birthDate: formData.birthDate,
+        cpf: formData.cpf || undefined,
+        gender: formData.gender || undefined,
+        currency: formData.currency,
+        updatedAt: new Date()
+      };
+
+      await updateUserProfile(updateData);
+      
+      // Forçar atualização do estado local
+      if (userProfile) {
+        setFormData({
+          ...formData,
+          name: updateData.name
+        });
+      }
+      
       setSuccess('Perfil atualizado com sucesso!');
       setIsEditing(false);
     } catch (err) {
-      setError('Erro ao atualizar perfil');
+      console.error('Erro ao atualizar perfil:', err);
+      setError('Erro ao atualizar perfil. Por favor, tente novamente.');
     }
   };
 
@@ -181,42 +205,6 @@ export default function Profile() {
       });
     } catch (err) {
       setError('Erro ao atualizar senha');
-    }
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    
-    try {
-      await createWallet(newWalletName);
-      setNewWalletName('');
-      setIsCreating(false);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Erro ao criar carteira');
-    }
-  };
-
-  const handleUpdate = async (id: string) => {
-    setError('');
-    
-    try {
-      await updateWallet(id, editingName);
-      setIsEditing(null);
-      setEditingName('');
-    } catch (error) {
-      setError('Erro ao atualizar carteira');
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta carteira?')) return;
-    
-    setError('');
-    try {
-      await deleteWallet(id);
-    } catch (error) {
-      setError('Erro ao excluir carteira');
     }
   };
 
@@ -267,7 +255,7 @@ export default function Profile() {
               <input
                 type="text"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                onChange={handleChange}
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
               />
             </div>
@@ -317,6 +305,24 @@ export default function Profile() {
                 <option value="male">Masculino</option>
                 <option value="female">Feminino</option>
                 <option value="other">Outro</option>
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="currency" className="block text-sm font-medium text-gray-700">
+                Moeda Padrão
+              </label>
+              <select
+                id="currency"
+                name="currency"
+                value={formData.currency}
+                onChange={handleChange}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              >
+                <option value="BRL">Real (R$)</option>
+                <option value="USD">Dólar ($)</option>
+                <option value="EUR">Euro (€)</option>
+                <option value="GBP">Libra (£)</option>
               </select>
             </div>
 
@@ -436,29 +442,38 @@ export default function Profile() {
         )}
       </div>
 
-
       <WalletManagement />
     </div>
   );
 }
 
 function WalletManagement() {
-  const { wallets, createWallet, updateWallet, deleteWallet, currentWallet } = useWallet();
-  const [isCreating, setIsCreating] = useState(false);
-  const [isEditing, setIsEditing] = useState<string | null>(null);
-  const [newWalletName, setNewWalletName] = useState('');
-  const [editingName, setEditingName] = useState('');
+  const { user } = useAuth();
+  const { wallets, sharedWallets, createWallet, updateWallet, deleteWallet, removeShare } = useWallet();
   const [error, setError] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [newWalletName, setNewWalletName] = useState('');
+  const [editingWallet, setEditingWallet] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+
+  // Filtrar carteiras próprias usando user.uid ao invés de userProfile?.uid
+  const ownedWallets = wallets.filter(w => w.userId === user?.uid);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
     try {
+      if (!newWalletName.trim()) {
+        setError('Por favor, insira um nome para a carteira');
+        return;
+      }
+
       await createWallet(newWalletName);
       setNewWalletName('');
       setIsCreating(false);
     } catch (error) {
+      console.error('Erro ao criar carteira:', error);
       setError(error instanceof Error ? error.message : 'Erro ao criar carteira');
     }
   };
@@ -468,7 +483,7 @@ function WalletManagement() {
     
     try {
       await updateWallet(id, editingName);
-      setIsEditing(null);
+      setEditingWallet(null);
       setEditingName('');
     } catch (error) {
       setError('Erro ao atualizar carteira');
@@ -486,6 +501,16 @@ function WalletManagement() {
     }
   };
 
+  const handleLeaveShare = async (walletId: string) => {
+    if (!window.confirm('Tem certeza que deseja deixar de compartilhar esta carteira?')) return;
+    
+    try {
+      await removeShare(walletId);
+    } catch (error) {
+      setError('Erro ao remover compartilhamento');
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-xl font-semibold mb-4 flex items-center">
@@ -499,86 +524,86 @@ function WalletManagement() {
         </div>
       )}
 
-      <div className="space-y-4">
-        {wallets.map(wallet => (
-          <div key={wallet.id} className="flex items-center justify-between p-3 border rounded-lg">
-            {isEditing === wallet.id ? (
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleUpdate(wallet.id);
-                }}
-                className="flex-1 flex items-center"
-              >
-                <input
-                  type="text"
-                  value={editingName}
-                  onChange={(e) => setEditingName(e.target.value)}
-                  className="flex-1 mr-2 px-2 py-1 border rounded"
-                  placeholder="Nome da carteira"
-                  autoFocus
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 mr-2"
-                >
-                  Salvar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditing(null);
-                    setEditingName('');
+      <div className="mb-8">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Minhas Carteiras</h3>
+        <div className="space-y-4">
+          {ownedWallets.map(wallet => (
+            <div key={wallet.id} className="flex items-center justify-between p-3 border rounded-lg">
+              {editingWallet === wallet.id ? (
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleUpdate(wallet.id);
                   }}
-                  className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                  className="flex-1 flex items-center"
                 >
-                  Cancelar
-                </button>
-              </form>
-            ) : (
-              <>
-                <div className="flex items-center">
-                  <span className="font-medium">{wallet.name}</span>
-                  {currentWallet?.id === wallet.id && (
-                    <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                      Atual
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    className="flex-1 mr-2 px-2 py-1 border rounded"
+                    placeholder="Nome da carteira"
+                    autoFocus
+                  />
                   <button
-                    onClick={() => {
-                      setIsEditing(wallet.id);
-                      setEditingName(wallet.name);
-                    }}
-                    className="p-1 text-gray-600 hover:text-blue-600"
+                    type="submit"
+                    className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 mr-2"
                   >
-                    <Edit2 className="h-4 w-4" />
+                    Salvar
                   </button>
-                  {wallets.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingWallet(null);
+                      setEditingName('');
+                    }}
+                    className="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                  >
+                    Cancelar
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <div className="flex items-center">
+                    <span className="font-medium">{wallet.name}</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <button
-                      onClick={() => handleDelete(wallet.id)}
-                      className="p-1 text-gray-600 hover:text-red-600"
+                      onClick={() => {
+                        setEditingWallet(wallet.id);
+                        setEditingName(wallet.name);
+                      }}
+                      className="p-1 text-gray-600 hover:text-blue-600"
+                      title="Editar nome"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Edit2 className="h-4 w-4" />
                     </button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        ))}
+                    {ownedWallets.length > 1 && (
+                      <button
+                        onClick={() => handleDelete(wallet.id)}
+                        className="p-1 text-gray-600 hover:text-red-600"
+                        title="Excluir carteira"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
 
-        {wallets.length < 3 && !isCreating ? (
+        {ownedWallets.length < 3 && !isCreating ? (
           <button
             onClick={() => setIsCreating(true)}
-            className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-500 flex items-center justify-center"
+            className="w-full mt-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-500 flex items-center justify-center"
           >
             <Plus className="h-5 w-5 mr-2" />
             Adicionar Carteira
           </button>
         ) : isCreating && (
-          <form onSubmit={handleCreate} className="flex items-center space-x-2">
+          <form onSubmit={handleCreate} className="mt-4 flex items-center space-x-2">
             <input
               type="text"
               value={newWalletName}
@@ -606,6 +631,32 @@ function WalletManagement() {
           </form>
         )}
       </div>
+
+      {/* Carteiras Compartilhadas */}
+      {sharedWallets.length > 0 && (
+        <div>
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Carteiras Compartilhadas Comigo</h3>
+          <div className="space-y-4">
+            {sharedWallets.map(wallet => (
+              <div key={wallet.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+                <div className="flex items-center">
+                  <span className="font-medium">{wallet.name}</span>
+                  <span className="ml-2 text-sm text-gray-500">
+                    (Criada por: {wallet.userId})
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleLeaveShare(wallet.id)}
+                  className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                  title="Deixar de compartilhar"
+                >
+                  Sair
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

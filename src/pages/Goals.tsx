@@ -3,9 +3,12 @@ import { collection, query, getDocs, addDoc, updateDoc, deleteDoc, doc, where, T
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useAlerts } from '../contexts/AlertContext';
 import { Plus, Pencil, Trash2, Target, Check, Trophy } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useFormatCurrency } from '../utils/formatCurrency';
+import { CurrencyInput } from '../components/CurrencyInput';
 
 interface Goal {
   id: string;
@@ -24,7 +27,8 @@ interface Transaction {
 
 export default function Goals() {
   const { user } = useAuth();
-  const { currentWallet } = useWallet();
+  const { currentWallet, isSharedWallet } = useWallet();
+  const { createAlert } = useAlerts();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [currentBalance, setCurrentBalance] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,6 +43,7 @@ export default function Goals() {
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [shouldCreateTransaction, setShouldCreateTransaction] = useState(false);
+  const formatCurrency = useFormatCurrency();
 
   useEffect(() => {
     if (user && currentWallet) {
@@ -49,6 +54,39 @@ export default function Goals() {
       ]);
     }
   }, [user, currentWallet]);
+
+  useEffect(() => {
+    if (goals.length > 0) {
+      const checkGoalsProgress = async () => {
+        goals.forEach(async (goal) => {
+          if (goal.completed) return; // Ignora metas já completadas
+          
+          const progress = (currentBalance / goal.target_amount) * 100;
+
+          // Notificar apenas marcos importantes não atingidos anteriormente
+          [25, 50, 75].forEach(async (milestone) => {
+            if (progress >= milestone && progress < milestone + 10) {
+              await createAlert('goal_milestone', {
+                goalName: goal.name,
+                percentage: milestone,
+                goalId: goal.id // Adiciona ID da meta para identificação única
+              });
+            }
+          });
+
+          // Notificar quando a meta for atingida
+          if (progress >= 100 && !goal.completed) {
+            await createAlert('goal_achieved', {
+              goalName: goal.name,
+              goalId: goal.id
+            });
+          }
+        });
+      };
+
+      checkGoalsProgress();
+    }
+  }, [currentBalance]); // Remove goals da dependência para evitar chamadas extras
 
   const calculateCurrentBalance = async () => {
     if (!user) return;
@@ -67,39 +105,32 @@ export default function Goals() {
   };
 
   const fetchGoals = async () => {
-    if (!user) return;
-
-    const goalsRef = collection(db, 'goals');
-    const q = query(goalsRef, where('userId', '==', user.uid));
-    const querySnapshot = await getDocs(q);
-    
-    const goalsData = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      deadline: new Date(doc.data().deadline.seconds * 1000)
-    })) as Goal[];
-
-    // Ordenar primeiro por prioridade (1 a 3) e depois por valor (menor para maior)
-    const sortedGoals = goalsData.sort((a, b) => {
-      // Primeiro critério: prioridade
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority;
-      }
-      // Segundo critério: valor (menor para maior)
-      return a.target_amount - b.target_amount;
-    });
-
-    const activeGoals = sortedGoals.filter(goal => !goal.completed);
-    setGoals(activeGoals);
-  };
-
-  const fetchCompletedGoals = async () => {
-    if (!user) return;
+    if (!user || !currentWallet) return;
 
     const goalsRef = collection(db, 'goals');
     const q = query(
       goalsRef, 
-      where('userId', '==', user.uid),
+      where('walletId', '==', currentWallet.id),
+      where('completed', '==', false)
+    );
+
+    const querySnapshot = await getDocs(q);
+    const goalsData = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      deadline: doc.data().deadline.toDate()
+    })) as Goal[];
+
+    setGoals(goalsData);
+  };
+
+  const fetchCompletedGoals = async () => {
+    if (!user || !currentWallet) return;
+
+    const goalsRef = collection(db, 'goals');
+    const q = query(
+      goalsRef, 
+      where('walletId', '==', currentWallet.id),
       where('completed', '==', true)
     );
     
@@ -107,7 +138,7 @@ export default function Goals() {
     const completedGoals = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      deadline: new Date(doc.data().deadline.seconds * 1000)
+      deadline: doc.data().deadline.toDate()
     })) as Goal[];
 
     setCompletedGoals(completedGoals);
@@ -115,14 +146,16 @@ export default function Goals() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !currentWallet) return;
     
     const goal = {
       name: formData.name,
       target_amount: Number(formData.target_amount.replace(/\D/g, '')) / 100,
       priority: Number(formData.priority),
       deadline: new Date(formData.deadline),
-      userId: user.uid
+      userId: user.uid,
+      walletId: currentWallet.id,
+      completed: false
     };
 
     if (editingGoal) {
@@ -150,7 +183,7 @@ export default function Goals() {
     setEditingGoal(goal);
     setFormData({
       name: goal.name,
-      target_amount: formatCurrencyInput(goal.target_amount),
+      target_amount: formatCurrency(goal.target_amount),
       priority: goal.priority.toString(),
       deadline: format(goal.deadline, 'yyyy-MM-dd')
     });
@@ -163,32 +196,6 @@ export default function Goals() {
       target_amount: '',
       priority: '2',
       deadline: format(new Date(), 'yyyy-MM-dd')
-    });
-  };
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
-  };
-
-  const formatCurrencyInput = (value: number | string) => {
-    const numericValue = typeof value === 'string' ? 
-      Number(value.replace(/\D/g, '')) / 100 : 
-      value;
-    
-    return new Intl.NumberFormat('pt-BR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numericValue);
-  };
-
-  const handleCurrencyInput = (value: string) => {
-    const numericValue = value.replace(/\D/g, '');
-    setFormData({
-      ...formData,
-      target_amount: formatCurrencyInput(numericValue)
     });
   };
 
@@ -251,43 +258,48 @@ export default function Goals() {
     setShouldCreateTransaction(false);
   };
 
-  const handleCompleteGoal = async () => {
-    if (!selectedGoal || !user) return;
+  const handleCompleteGoal = async (goal: Goal) => {
+    if (!user || !currentWallet) return;
 
     try {
-      const goalRef = doc(db, 'goals', selectedGoal.id);
-      const now = new Date();
-      
+      // Atualizar o status da meta no Firestore
+      const goalRef = doc(db, 'goals', goal.id);
       await updateDoc(goalRef, {
         completed: true,
-        completedAt: Timestamp.fromDate(now)
+        completedAt: new Date()
       });
 
-      if (shouldCreateTransaction) {
-        // Criar transação de despesa
-        await addDoc(collection(db, 'transactions'), {
-          type: 'expense',
-          amount: selectedGoal.target_amount,
-          description: `Meta concluída: ${selectedGoal.name}`,
-          category: 'goals',
-          date: now,
-          userId: user.uid
-        });
-      }
+      // Criar notificação de meta alcançada
+      await createAlert('goal_achieved', {
+        goalName: goal.name,
+        goalId: goal.id
+      });
 
-      // Atualizar as listas
-      await fetchGoals();
-      await fetchCompletedGoals();
-      if (shouldCreateTransaction) {
-        await calculateCurrentBalance();
-      }
-      
+      // Atualizar a lista de metas
+      await Promise.all([
+        fetchGoals(),
+        fetchCompletedGoals()
+      ]);
+
+      // Fechar o modal
       setIsCompleteModalOpen(false);
       setSelectedGoal(null);
-      setShouldCreateTransaction(false);
+
+      // Opcional: Criar transação se o usuário escolheu
+      if (shouldCreateTransaction) {
+        const transactionsRef = collection(db, 'transactions');
+        await addDoc(transactionsRef, {
+          amount: goal.target_amount,
+          description: `Meta alcançada: ${goal.name}`,
+          category: 'savings', // ou categoria específica para metas
+          type: 'income',
+          date: new Date(),
+          userId: user.uid,
+          walletId: currentWallet.id
+        });
+      }
     } catch (error) {
       console.error('Erro ao concluir meta:', error);
-      alert('Erro ao concluir meta. Tente novamente.');
     }
   };
 
@@ -297,102 +309,107 @@ export default function Goals() {
         <Target className="h-8 w-8 text-orange-500 mr-3" />
         <h1 className="text-3xl font-bold text-gray-900">Metas Financeiras</h1>
       </div>
-      <div className="flex justify-between items-center mb-8">
+
+      {/* Botão de adicionar meta */}
+      <div className="mb-8">
         <button
           onClick={() => {
             resetForm();
             setIsModalOpen(true);
           }}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           <Plus className="h-5 w-5 mr-2" />
           Nova Meta
         </button>
       </div>
 
-      {/* Saldo Atual */}
-      <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">Saldo Disponível</h2>
-        <p className="text-3xl font-bold text-blue-600">{formatCurrency(currentBalance)}</p>
-      </div>
+      {/* Metas Ativas */}
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Metas em Andamento</h2>
+        {goals.length === 0 ? (
+          <div className="text-center py-8 bg-white rounded-xl shadow-sm">
+            <Target className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-500">Nenhuma meta financeira definida</p>
+            <p className="text-sm text-gray-400">
+              Clique em "Nova Meta" para começar a planejar seus objetivos
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {goals.map((goal, index) => {
+              const progressAmount = getGoalProgressAmount(index, goal.target_amount);
+              const isComplete = progressAmount >= goal.target_amount;
 
-      {/* Lista de Metas Ativas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {goals.map((goal, index) => {
-          const progressAmount = getGoalProgressAmount(index, goal.target_amount);
-          const isComplete = progressAmount >= goal.target_amount;
-
-          return (
-            <div key={goal.id} className="bg-white rounded-xl shadow-sm p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center">
-                  <Target className="h-5 w-5 text-blue-500 mr-2" />
-                  <h3 className="text-lg font-semibold text-gray-900">{goal.name}</h3>
-                </div>
-                <div className="flex space-x-2">
-                  {isComplete && (
-                    <button
-                      onClick={() => openCompleteModal(goal)}
-                      className="p-1 text-green-600 hover:text-green-800"
-                      title="Concluir Meta"
-                    >
-                      <Check className="h-5 w-5" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleEdit(goal)}
-                    className="text-blue-600 hover:text-blue-900"
-                  >
-                    <Pencil className="h-5 w-5" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(goal.id)}
-                    className="text-red-600 hover:text-red-900"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm text-gray-600 mb-1">
-                    <span>Progresso</span>
-                    <span>
-                      {formatCurrency(progressAmount)} / {formatCurrency(goal.target_amount)}
-                    </span>
+              return (
+                <div key={goal.id} className="bg-white rounded-xl shadow-sm p-6">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center">
+                      <Target className="h-5 w-5 text-blue-500 mr-2" />
+                      <h3 className="text-lg font-semibold text-gray-900">{goal.name}</h3>
+                    </div>
+                    <div className="flex space-x-2">
+                      {isComplete && (
+                        <button
+                          onClick={() => openCompleteModal(goal)}
+                          className="p-1 text-green-600 hover:text-green-800"
+                          title="Concluir Meta"
+                        >
+                          <Check className="h-5 w-5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleEdit(goal)}
+                        className="text-blue-600 hover:text-blue-900"
+                      >
+                        <Pencil className="h-5 w-5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(goal.id)}
+                        className="text-red-600 hover:text-red-900"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full ${isComplete ? 'bg-green-600' : 'bg-blue-600'}`}
-                      style={{
-                        width: `${Math.min(
-                          (progressAmount / goal.target_amount) * 100,
-                          100
-                        )}%`
-                      }}
-                    ></div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-sm text-gray-600 mb-1">
+                        <span>Progresso</span>
+                        <span>
+                          {formatCurrency(progressAmount)} / {formatCurrency(goal.target_amount)}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${isComplete ? 'bg-green-600' : 'bg-blue-600'}`}
+                          style={{
+                            width: `${Math.min(
+                              (progressAmount / goal.target_amount) * 100,
+                              100
+                            )}%`
+                          }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="text-sm text-gray-600">
+                      Previsão: {format(goal.deadline, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                    </div>
                   </div>
                 </div>
-
-                <div className="text-sm text-gray-600">
-                  Previsão: {format(goal.deadline, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Metas Concluídas */}
       {completedGoals.length > 0 && (
         <div className="mt-12">
-          <div className="flex items-center mb-6">
-            <Trophy className="h-6 w-6 text-yellow-500 mr-2" />
-            <h2 className="text-xl font-semibold text-gray-900">Metas Concluídas</h2>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">🏆 Metas Concluídas</h2>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {completedGoals.map((goal) => (
               <div key={goal.id} className="bg-gray-50 rounded-xl shadow-sm p-6">
                 <div className="flex items-center mb-4">
@@ -413,13 +430,6 @@ export default function Goals() {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {goals.length === 0 && (
-        <div className="text-center py-12">
-          <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500">Nenhuma meta financeira definida</p>
         </div>
       )}
 
@@ -444,18 +454,11 @@ export default function Goals() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">Valor Alvo</label>
-                <div className="relative mt-1">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500">
-                    R$
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={formData.target_amount}
-                    onChange={(e) => handleCurrencyInput(e.target.value)}
-                    className="pl-8 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
+                <CurrencyInput
+                  value={formData.target_amount}
+                  onChange={(e) => setFormData({ ...formData, target_amount: e.target.value })}
+                  required
+                />
               </div>
 
               <div>
@@ -509,42 +512,40 @@ export default function Goals() {
 
       {/* Adicionar o Modal de Conclusão */}
       {isCompleteModalOpen && selectedGoal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h2 className="text-xl font-semibold mb-4">Concluir Meta</h2>
-            
-            <p className="text-gray-600 mb-6">
-              Tem certeza que deseja marcar a meta "{selectedGoal.name}" como concluída?
+            <h2 className="text-xl font-semibold mb-4">
+              Concluir Meta: {selectedGoal.name}
+            </h2>
+            <p className="text-gray-600 mb-4">
+              Tem certeza que deseja marcar esta meta como concluída?
             </p>
-
-            <div className="mb-6">
-              <label className="flex items-center space-x-2">
+            <div className="mb-4">
+              <label className="flex items-center">
                 <input
                   type="checkbox"
                   checked={shouldCreateTransaction}
                   onChange={(e) => setShouldCreateTransaction(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="rounded border-gray-300 text-blue-600"
                 />
-                <span className="text-sm text-gray-700">
-                  Registrar valor como despesa ({formatCurrency(selectedGoal.target_amount)})
+                <span className="ml-2 text-sm text-gray-600">
+                  Criar transação com o valor da meta
                 </span>
               </label>
             </div>
-
             <div className="flex justify-end space-x-3">
               <button
                 onClick={() => {
                   setIsCompleteModalOpen(false);
                   setSelectedGoal(null);
-                  setShouldCreateTransaction(false);
                 }}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md"
               >
                 Cancelar
               </button>
               <button
-                onClick={handleCompleteGoal}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                onClick={() => handleCompleteGoal(selectedGoal)}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md"
               >
                 Confirmar
               </button>

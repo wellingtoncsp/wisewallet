@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -13,120 +14,161 @@ import Profile from './pages/Profile';
 import Family from './pages/Family';
 import Suggestions from './pages/Suggestions';
 import Reports from './pages/Reports';
+import Notifications from './pages/Notifications';
 import { WalletProvider } from './contexts/WalletContext';
-
-interface PrivateRouteProps {
-  children: React.ReactNode;
-}
-
-function PrivateRoute({ children }: PrivateRouteProps) {
-  const { user } = useAuth();
-  return user ? <>{children}</> : <Navigate to="/login" />;
-}
+import { AlertProvider } from './contexts/AlertContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { CurrencyProvider } from './contexts/CurrencyContext';
+import Home from './pages/Home';
 
 function App() {
   return (
     <Router>
       <AuthProvider>
-        <WalletProvider>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route
-              path="/"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Dashboard />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/transactions"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Transactions />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/goals"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Goals />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/budget"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Budget />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/charts"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Charts />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/suggestions"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Suggestions />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/family"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Family />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/profile"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Profile />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/reports"
-              element={
-                <PrivateRoute>
-                  <Layout>
-                    <Reports />
-                  </Layout>
-                </PrivateRoute>
-              }
-            />
-          </Routes>
-        </WalletProvider>
+        <ThemeProvider>
+          <CurrencyProvider>
+            <WalletProvider>
+              <AlertProvider>
+                <AppRoutes />
+              </AlertProvider>
+            </WalletProvider>
+          </CurrencyProvider>
+        </ThemeProvider>
       </AuthProvider>
     </Router>
   );
+}
+
+function AppRoutes() {
+  const { user, loading } = useAuth();
+  console.log('AppRoutes - Current user:', user?.email, 'Loading:', loading);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Home />} />
+      <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+      <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+      <Route
+        path="/dashboard/*"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Dashboard />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transactions"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Transactions />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/goals"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Goals />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/budget"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Budget />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/charts"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Charts />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/suggestions"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Suggestions />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/family"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Family />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Profile />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Reports />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/notifications"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Notifications />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
+  );
+}
+
+// Componente para rotas públicas (login/registro)
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 export default App;

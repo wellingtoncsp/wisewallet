@@ -45,6 +45,7 @@ interface WalletContextType {
   activeShares: WalletShareWithUser[];
   removeShare: (shareId: string) => Promise<void>;
   sentPendingShares: WalletShareWithUser[];
+  isSharedWallet: (walletId: string) => boolean;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -65,11 +66,22 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       fetchSharedWallets();
       fetchActiveShares();
       fetchSentPendingShares();
+      
+      // Recuperar carteira selecionada do localStorage
+      const savedWalletId = localStorage.getItem('currentWalletId');
+      if (savedWalletId) {
+        const allWallets = [...wallets, ...sharedWallets];
+        const savedWallet = allWallets.find(w => w.id === savedWalletId);
+        if (savedWallet) {
+          setCurrentWalletState(savedWallet);
+        }
+      }
     }
   }, [user]);
 
   const fetchWallets = async () => {
     if (!user) return;
+    setIsLoading(true);
 
     try {
       // Buscar carteiras próprias
@@ -82,48 +94,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         ...doc.data(),
         createdAt: doc.data().createdAt.toDate()
       })) as Wallet[];
-      
-      console.log('Carteiras próprias:', ownedWallets);
 
-      // Buscar carteiras compartilhadas
-      const sharesRef = collection(db, 'wallet_shares');
-      const sharesQuery = query(
-        sharesRef,
-        where('sharedWithEmail', '==', user.email),
-        where('status', '==', 'accepted')
-      );
+      setWallets(ownedWallets);
       
-      const sharesSnapshot = await getDocs(sharesQuery);
-      console.log('Compartilhamentos encontrados:', sharesSnapshot.docs.map(d => d.data()));
-      
-      const sharedWalletIds = sharesSnapshot.docs.map(doc => doc.data().walletId);
-      console.log('IDs das carteiras compartilhadas:', sharedWalletIds);
-
-      // Buscar detalhes das carteiras compartilhadas
-      const sharedWallets = await Promise.all(
-        sharedWalletIds.map(async (id) => {
-          const walletDoc = await getDoc(doc(db, 'wallets', id));
-          return { id: walletDoc.id, ...walletDoc.data() };
-        })
-      );
-      
-      console.log('Detalhes das carteiras compartilhadas:', sharedWallets);
-
-      // Combinar carteiras próprias e compartilhadas
-      const allWallets = [...ownedWallets, ...sharedWallets];
-      console.log('Todas as carteiras combinadas:', allWallets);
-      setWallets(allWallets as Wallet[]);
-      setSharedWallets(sharedWallets as Wallet[]); // Garantir que sharedWallets está sendo atualizado
-
-      // Se não houver carteiras próprias, criar uma padrão
+      // Se não houver carteiras, criar uma padrão
       if (ownedWallets.length === 0) {
         const defaultWallet = await createWallet('Carteira Principal');
-        allWallets.push(defaultWallet);
-      }
-
-      // Selecionar a primeira carteira como atual se nenhuma estiver selecionada
-      if (!currentWallet && allWallets.length > 0) {
-        setCurrentWalletState(allWallets[0]);
+        setWallets([defaultWallet]);
+        setCurrentWalletState(defaultWallet);
+      } else if (!currentWallet) {
+        setCurrentWalletState(ownedWallets[0]);
       }
 
       setIsLoading(false);
@@ -136,51 +116,40 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const fetchSharedWallets = async () => {
     if (!user) return;
 
-    // Buscar compartilhamentos aceitos
-    const sharesRef = collection(db, 'wallet_shares');
-    const q = query(
-      sharesRef,
-      where('sharedWithEmail', '==', user.email),
-      where('status', '==', 'accepted')
-    );
-    
-    const snapshot = await getDocs(q);
-    const shares = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as WalletShare[];
+    console.log('Fetching shared wallets for user:', user.email);
 
-    // Buscar as carteiras compartilhadas
-    const walletIds = shares.map(share => share.walletId);
-    const walletsData = await Promise.all(
-      walletIds.map(async (id) => {
-        const walletDoc = await getDoc(doc(db, 'wallets', id));
-        return { id: walletDoc.id, ...walletDoc.data() };
-      })
-    );
+    try {
+      const sharesRef = collection(db, 'wallet_shares');
+      const q = query(
+        sharesRef,
+        where('sharedWithEmail', '==', user.email),
+        where('status', '==', 'accepted')
+      );
+      
+      const snapshot = await getDocs(q);
+      console.log('Shared wallets found:', snapshot.docs.length);
 
-    setSharedWallets(walletsData as Wallet[]);
-
-    // Buscar compartilhamentos pendentes com dados do usuário
-    const pendingQ = query(
-      sharesRef,
-      where('sharedWithEmail', '==', user.email),
-      where('status', '==', 'pending')
-    );
-    
-    const pendingSnapshot = await getDocs(pendingQ);
-    const pendingSharesPromises = pendingSnapshot.docs.map(async doc => {
-      const shareData = doc.data();
-      const userData = await fetchUserData(shareData.sharedByUserId);
-      return {
+      const shares = snapshot.docs.map(doc => ({
         id: doc.id,
-        ...shareData,
-        sharedByUser: userData
-      };
-    });
+        ...doc.data()
+      }));
 
-    const pendingShares = await Promise.all(pendingSharesPromises);
-    setPendingShares(pendingShares as WalletShareWithUser[]);
+      console.log('Shares:', shares);
+
+      // Buscar as carteiras compartilhadas
+      const walletIds = shares.map(share => share.walletId);
+      const walletsData = await Promise.all(
+        walletIds.map(async (id) => {
+          const walletDoc = await getDoc(doc(db, 'wallets', id));
+          return { id: walletDoc.id, ...walletDoc.data() };
+        })
+      );
+
+      console.log('Shared wallets data:', walletsData);
+      setSharedWallets(walletsData);
+    } catch (error) {
+      console.error('Error fetching shared wallets:', error);
+    }
   };
 
   const fetchUserData = async (userId: string): Promise<UserData | null> => {
@@ -250,17 +219,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setSentPendingShares(shares);
   };
 
-  const createWallet = async (name: string) => {
-    if (!user) return;
-
-    // Contar carteiras próprias e compartilhadas
-    const ownedWalletsCount = wallets.filter(w => w.userId === user.uid).length;
-    const sharedWalletsCount = sharedWallets.length;
-    const totalWallets = ownedWalletsCount + sharedWalletsCount;
-
-    if (totalWallets >= 3) {
-      throw new Error('Limite máximo de 3 carteiras atingido (incluindo compartilhadas)');
-    }
+  const createWallet = async (name: string): Promise<Wallet> => {
+    if (!user) throw new Error('Usuário não autenticado');
 
     const newWallet = {
       name,
@@ -269,14 +229,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     };
 
     const docRef = await addDoc(collection(db, 'wallets'), newWallet);
-    const wallet = { id: docRef.id, ...newWallet };
-    
-    setWallets(prev => [...prev, wallet]);
-    if (!currentWallet) {
-      setCurrentWalletState(wallet);
-    }
-
-    return wallet;
+    return { id: docRef.id, ...newWallet };
   };
 
   const updateWallet = async (id: string, name: string) => {
@@ -319,8 +272,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setCurrentWallet = (wallet: Wallet) => {
+    // Salvar no localStorage
+    localStorage.setItem('currentWalletId', wallet.id);
     setCurrentWalletState(wallet);
-    // Disparar um evento customizado para notificar a mudança de carteira
     window.dispatchEvent(new CustomEvent('walletChanged', { detail: wallet }));
   };
 
@@ -389,6 +343,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     await fetchActiveShares();
   };
 
+  // Função para verificar se uma carteira é compartilhada
+  const isSharedWallet = (walletId: string) => {
+    return sharedWallets.some(wallet => wallet.id === walletId);
+  };
+
   return (
     <WalletContext.Provider 
       value={{ 
@@ -407,6 +366,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         activeShares,
         removeShare,
         sentPendingShares,
+        isSharedWallet,
       }}
     >
       {children}
@@ -420,4 +380,42 @@ export function useWallet() {
     throw new Error('useWallet must be used within a WalletProvider');
   }
   return context;
+}
+
+function WalletSelector() {
+  const { currentWallet, setCurrentWallet, wallets, sharedWallets } = useWallet();
+  
+  const handleWalletChange = (walletId: string) => {
+    const allWallets = [...wallets, ...sharedWallets];
+    const selectedWallet = allWallets.find(w => w.id === walletId);
+    if (selectedWallet) {
+      setCurrentWallet(selectedWallet);
+    }
+  };
+
+  return (
+    <select
+      value={currentWallet?.id || ''}
+      onChange={(e) => handleWalletChange(e.target.value)}
+      className="..."
+    >
+      <optgroup label="Minhas Carteiras">
+        {wallets.map(wallet => (
+          <option key={wallet.id} value={wallet.id}>
+            {wallet.name}
+          </option>
+        ))}
+      </optgroup>
+      
+      {sharedWallets.length > 0 && (
+        <optgroup label="Carteiras Compartilhadas">
+          {sharedWallets.map(wallet => (
+            <option key={wallet.id} value={wallet.id}>
+              {wallet.name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
 } 

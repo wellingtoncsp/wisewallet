@@ -21,6 +21,7 @@ import * as XLSX from 'xlsx';
 import { transactionCategories } from '../utils/categories';
 import { ptBR } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
+import { useFormatCurrency } from '../utils/formatCurrency';
 
 interface Transaction {
   id: string;
@@ -72,13 +73,7 @@ export default function Dashboard() {
     currentMonth: { income: 0, expenses: 0 }
   });
   const [budgets, setBudgets] = useState<Budget[]>([]);
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
-  };
+  const formatCurrency = useFormatCurrency();
 
   useEffect(() => {
     if (user && currentWallet) {
@@ -96,27 +91,17 @@ export default function Dashboard() {
   }, []);
 
   const loadDashboardData = async () => {
-    await Promise.all([
-      fetchTransactions(),
-      fetchGoals(),
-      fetchBudgets(),
-      fetchUpcomingBills()
-    ]);
-  };
-
-  const fetchTransactions = async () => {
     if (!user || !currentWallet) return;
 
     try {
-      // Buscar todas as transações do usuário
+      // Buscar todas as transações da carteira
       const transactionsRef = collection(db, 'transactions');
       const q = query(
         transactionsRef, 
-        where('userId', '==', user.uid),
         where('walletId', '==', currentWallet.id)
       );
-      const querySnapshot = await getDocs(q);
       
+      const querySnapshot = await getDocs(q);
       const transactions = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
@@ -129,21 +114,53 @@ export default function Dashboard() {
       }, 0);
       setCurrentBalance(totalBalance);
 
+      // Buscar metas
+      const goalsRef = collection(db, 'goals');
+      const goalsQuery = query(
+        goalsRef,
+        where('walletId', '==', currentWallet.id),
+        where('completed', '==', false)
+      );
+      
+      const goalsSnapshot = await getDocs(goalsQuery);
+      const goalsData = goalsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        deadline: doc.data().deadline.toDate()
+      })) as Goal[];
+
+      // Ordenar metas por prioridade e data
+      const sortedGoals = goalsData
+        .sort((a, b) => {
+          // Primeiro por prioridade
+          if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+          }
+          // Depois por data mais próxima
+          return a.deadline.getTime() - b.deadline.getTime();
+        })
+        .slice(0, 3); // Limitar a 3 metas
+
+      setUpcomingGoals(sortedGoals);
+
+      // Buscar orçamentos
+      const budgetsRef = collection(db, 'budgets');
+      const budgetsQuery = query(
+        budgetsRef,
+        where('walletId', '==', currentWallet.id)
+      );
+      
+      const budgetsSnapshot = await getDocs(budgetsQuery);
+      const budgetsData = budgetsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Budget[];
+      setBudgets(budgetsData);
+
       // Filtrar transações do mês atual
       const now = new Date();
       const firstDayOfMonth = startOfMonth(now);
       const lastDayOfMonth = endOfMonth(now);
-
-      console.log('Período de filtragem:', {
-        firstDayOfMonth,
-        lastDayOfMonth,
-        transactions: transactions.map(t => ({
-          data: t.date,
-          valor: t.amount,
-          categoria: t.category,
-          tipo: t.type
-        }))
-      });
 
       const currentMonthTransactions = transactions.filter(transaction => 
         isWithinInterval(transaction.date, {
@@ -164,22 +181,44 @@ export default function Dashboard() {
       setMonthlyIncome(monthIncome);
       setMonthlyExpenses(monthExpenses);
 
-      // Guardar todas as transações para uso em outros componentes
-      const sortedTransactions = [...transactions].sort((a, b) => 
-        b.date.getTime() - a.date.getTime()
-      );
-      setRecentTransactions(sortedTransactions);
-      setFilteredTransactions(sortedTransactions);
+      // Calcular tendência mensal
+      const previousMonthStart = startOfMonth(subMonths(now, 1));
+      const previousMonthEnd = endOfMonth(subMonths(now, 1));
 
-      console.log('Transações processadas:', {
-        total: transactions.length,
-        mesAtual: currentMonthTransactions.length,
-        receitas: monthIncome,
-        despesas: monthExpenses
+      const previousMonthTransactions = transactions.filter(transaction =>
+        isWithinInterval(transaction.date, {
+          start: previousMonthStart,
+          end: previousMonthEnd
+        })
+      );
+
+      const previousMonthIncome = previousMonthTransactions
+        .filter(t => t.type === 'income')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const previousMonthExpenses = previousMonthTransactions
+        .filter(t => t.type === 'expense')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      setMonthlyTrend({
+        previousMonth: { 
+          income: previousMonthIncome, 
+          expenses: previousMonthExpenses 
+        },
+        currentMonth: { 
+          income: monthIncome, 
+          expenses: monthExpenses 
+        }
       });
 
+      // Ordenar transações por data
+      const sortedTransactions = [...transactions].sort(
+        (a, b) => b.date.getTime() - a.date.getTime()
+      );
+      setRecentTransactions(sortedTransactions.slice(0, 5));
+
     } catch (error) {
-      console.error('Erro ao buscar transações:', error);
+      console.error('Erro ao carregar dados do dashboard:', error);
     }
   };
 
@@ -373,22 +412,30 @@ export default function Dashboard() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Próximas Metas</h2>
           <div className="space-y-4">
             {upcomingGoals.length > 0 ? (
-              upcomingGoals.map((goal) => (
-                <div key={goal.id} className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <Target className="h-5 w-5 text-orange-500 mr-3" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{goal.name}</p>
-                      <p className="text-xs text-gray-500">
-                        Vence em {format(goal.deadline, "dd 'de' MMMM", { locale: ptBR })}
-                      </p>
+              upcomingGoals.map((goal) => {
+                const progress = (currentBalance / goal.target_amount) * 100;
+                return (
+                  <div key={goal.id} className="border-b pb-4 last:border-0">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-medium text-gray-900">{goal.name}</h3>
+                        <p className="text-sm text-gray-500">
+                          {formatCurrency(currentBalance)} de {formatCurrency(goal.target_amount)}
+                        </p>
+                      </div>
+                      <span className="text-sm text-gray-500">
+                        {format(goal.deadline, "dd/MM/yyyy")}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full bg-blue-600"
+                        style={{ width: `${Math.min(progress, 100)}%` }}
+                      ></div>
                     </div>
                   </div>
-                  <span className="font-medium text-blue-600">
-                    {formatCurrency(goal.target_amount)}
-                  </span>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="text-center py-6">
                 <Target className="h-12 w-12 text-gray-400 mx-auto mb-2" />

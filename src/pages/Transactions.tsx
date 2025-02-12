@@ -3,9 +3,12 @@ import { collection, query, getDocs, addDoc, updateDoc, deleteDoc, doc, where } 
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useAlerts } from '../contexts/AlertContext';
 import { Plus, Pencil, Trash2, ArrowUpCircle, ArrowDownCircle, Receipt } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
+import { useFormatCurrency } from '../utils/formatCurrency';
+import { CurrencyInput } from '../components/CurrencyInput';
 
 interface Transaction {
   id: string;
@@ -20,7 +23,8 @@ interface Transaction {
 
 export default function Transactions() {
   const { user } = useAuth();
-  const { currentWallet } = useWallet();
+  const { currentWallet, isSharedWallet } = useWallet();
+  const { createAlert } = useAlerts();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -33,6 +37,7 @@ export default function Transactions() {
   });
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const formatCurrency = useFormatCurrency();
 
   useEffect(() => {
     if (user && currentWallet) {
@@ -44,13 +49,24 @@ export default function Transactions() {
     if (!user || !currentWallet) return;
 
     const transactionsRef = collection(db, 'transactions');
-    const q = query(
-      transactionsRef, 
-      where('userId', '==', user.uid),
-      where('walletId', '==', currentWallet.id)
-    );
-    const querySnapshot = await getDocs(q);
+    let q;
     
+    if (isSharedWallet(currentWallet.id)) {
+      // Para carteiras compartilhadas, buscar por walletId
+      q = query(
+        transactionsRef, 
+        where('walletId', '==', currentWallet.id)
+      );
+    } else {
+      // Para carteiras próprias, buscar por userId e walletId
+      q = query(
+        transactionsRef, 
+        where('walletId', '==', currentWallet.id),
+        where('userId', '==', user.uid)
+      );
+    }
+
+    const querySnapshot = await getDocs(q);
     const transactionsData = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
@@ -121,6 +137,47 @@ export default function Transactions() {
       resetForm();
       fetchTransactions();
       setSuccess('Transação salva com sucesso!');
+
+      // Notificar transações grandes
+      if (amount >= 1000) {
+        await createAlert('transaction_large', {
+          type: newTransaction.type,
+          amount: formatCurrency(amount)
+        });
+      }
+
+      // Verificar padrões de gastos
+      if (newTransaction.type === 'expense') {
+        const categoryTransactions = transactions.filter(t => 
+          t.category === newTransaction.category &&
+          t.type === 'expense'
+        );
+
+        if (categoryTransactions.length >= 3) {
+          const totalAmount = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
+          if (totalAmount > 2000) {
+            await createAlert('spending_pattern', {
+              category: newTransaction.category
+            });
+          }
+        }
+      }
+
+      // Verificar sequência de economia
+      if (newTransaction.type === 'income') {
+        const lastMonthExpenses = transactions
+          .filter(t => 
+            t.type === 'expense' && 
+            t.date >= startOfMonth(new Date())
+          )
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        if (lastMonthExpenses < amount * 0.7) {
+          await createAlert('saving_streak', {
+            days: 30
+          });
+        }
+      }
     } catch (error) {
       console.error('Erro ao salvar transação:', error);
       setError('Erro ao salvar transação. Tente novamente.');
@@ -157,12 +214,32 @@ export default function Transactions() {
     });
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
-  };
+  // Gerar resumo mensal
+  useEffect(() => {
+    const generateMonthlySummary = async () => {
+      const now = new Date();
+      const isLastDayOfMonth = endOfMonth(now).getDate() === now.getDate();
+
+      if (isLastDayOfMonth) {
+        const monthIncome = transactions
+          .filter(t => t.type === 'income')
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const monthExpenses = transactions
+          .filter(t => t.type === 'expense')
+          .reduce((sum, t) => sum + t.amount, 0);
+
+        const savedAmount = monthIncome - monthExpenses;
+        
+        await createAlert('monthly_summary', {
+          savedAmount: formatCurrency(savedAmount),
+          comparison: savedAmount > 0 ? 1 : -1
+        });
+      }
+    };
+
+    generateMonthlySummary();
+  }, [transactions]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -289,18 +366,11 @@ export default function Transactions() {
                 <label className="block text-sm font-medium text-gray-700">
                   Valor <span className="text-red-500">*</span>
                 </label>
-                <div className="relative mt-1">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500">
-                    R$
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={formData.amount}
-                    onChange={(e) => handleAmountChange(e.target.value)}
-                    className="pl-8 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
+                <CurrencyInput
+                  value={formData.amount}
+                  onChange={(e) => handleAmountChange(e.target.value)}
+                  required
+                />
               </div>
 
               <div>

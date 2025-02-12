@@ -3,10 +3,13 @@ import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc } 
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useAlerts } from '../contexts/AlertContext';
 import { Plus, Pencil, Trash2, AlertTriangle, PiggyBank } from 'lucide-react';
 import { format, parseISO, startOfDay, endOfDay, lastDayOfMonth, startOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
 import { ptBR } from 'date-fns/locale';
+import { useFormatCurrency } from '../utils/formatCurrency';
+import { CurrencyInput } from '../components/CurrencyInput';
 
 interface Budget {
   id: string;
@@ -34,7 +37,8 @@ interface Transaction {
 
 export default function Budget() {
   const { user } = useAuth();
-  const { currentWallet } = useWallet();
+  const { currentWallet, isSharedWallet } = useWallet();
+  const { createAlert } = useAlerts();
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -43,6 +47,7 @@ export default function Budget() {
     category: '',
     limit: ''
   });
+  const formatCurrency = useFormatCurrency();
 
   useEffect(() => {
     if (user && currentWallet) {
@@ -53,15 +58,49 @@ export default function Budget() {
     }
   }, [user, currentWallet]);
 
+  const checkAllBudgets = async () => {
+    budgets.forEach(async (budget) => {
+      const spent = transactions
+        .filter(t => t.category === budget.category)
+        .reduce((sum, t) => sum + t.amount, 0);
+      
+      const percentage = (spent / budget.limit) * 100;
+
+      if (percentage >= 80 && percentage < 100) {
+        await createAlert('budget_warning', {
+          category: budget.category,
+          percentage: Math.round(percentage),
+          budgetId: budget.id,
+          month: new Date().toISOString().slice(0, 7)
+        });
+      }
+      
+      if (percentage >= 100) {
+        await createAlert('budget_exceeded', {
+          category: budget.category,
+          percentage: Math.round(percentage),
+          budgetId: budget.id,
+          month: new Date().toISOString().slice(0, 7)
+        });
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (budgets.length > 0 && transactions.length > 0) {
+      checkAllBudgets();
+    }
+  }, [transactions]);
+
   const fetchBudgets = async () => {
     if (!user || !currentWallet) return;
     
     const budgetsRef = collection(db, 'budgets');
     const q = query(
       budgetsRef, 
-      where('userId', '==', user.uid),
       where('walletId', '==', currentWallet.id)
     );
+
     const snapshot = await getDocs(q);
     
     setBudgets(snapshot.docs.map(doc => ({
@@ -141,13 +180,6 @@ export default function Budget() {
     });
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(amount);
-  };
-
   const formatCurrencyInput = (value: string | number) => {
     const numericValue = typeof value === 'string' ? 
       Number(value.replace(/\D/g, '')) / 100 : 
@@ -210,84 +242,110 @@ export default function Budget() {
     });
   };
 
+  const handleAddTransaction = async (transaction: Transaction) => {
+    // ... código existente ...
+
+    // Verificar limites do orçamento
+    const budget = budgets.find(b => b.category === transaction.category);
+    if (budget) {
+      const currentSpent = transactions
+        .filter(t => t.category === transaction.category)
+        .reduce((sum, t) => sum + t.amount, 0);
+      await checkAllBudgets();
+    }
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center mb-8">
-        <PiggyBank className="h-8 w-8 text-pink-500 mr-3" />
+        <PiggyBank className="h-8 w-8 text-green-500 mr-3" />
         <h1 className="text-3xl font-bold text-gray-900">Orçamentos</h1>
       </div>
-      <div className="flex justify-between items-center mb-8">
+
+      <div className="mb-8">
         <button
           onClick={() => {
             resetForm();
             setIsModalOpen(true);
           }}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           <Plus className="h-5 w-5 mr-2" />
           Novo Orçamento
         </button>
       </div>
 
-      {/* Lista de Orçamentos */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {budgets.map(budget => (
-          <div key={budget.id} className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex justify-between items-start mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {transactionCategories.find(cat => cat.id === budget.category)?.label}
-              </h3>
-              <div className="flex space-x-2">
-                <button onClick={() => handleEdit(budget)}>
-                  <Pencil className="h-5 w-5 text-blue-600" />
-                </button>
-                <button onClick={() => handleDelete(budget.id)}>
-                  <Trash2 className="h-5 w-5 text-red-600" />
-                </button>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-gray-900 mb-2">
-              {formatCurrency(budget.limit)}
-            </p>
-            <p className="text-sm text-gray-500">Limite mensal</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Resumo e Sugestões */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-6">Resumo do Mês Atual</h2>
-        <div className="space-y-6">
-          {getBudgetSummaries().map(summary => (
-            <div key={summary.category} className="border-b pb-4 last:border-0">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <h3 className="font-medium text-gray-900">
-                    {transactionCategories.find(cat => cat.id === summary.category)?.label}
+      {budgets.length === 0 ? (
+        <div className="text-center py-8 bg-white rounded-xl shadow-sm">
+          <PiggyBank className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+          <p className="text-gray-500">Nenhum orçamento definido</p>
+          <p className="text-sm text-gray-400">
+            Clique em "Novo Orçamento" para começar a controlar seus gastos
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Lista de Orçamentos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            {budgets.map(budget => (
+              <div key={budget.id} className="bg-white rounded-xl shadow-sm p-6">
+                <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {transactionCategories.find(cat => cat.id === budget.category)?.label}
                   </h3>
-                  <p className="text-sm text-gray-500">
-                    {formatCurrency(summary.currentSpent)} de {formatCurrency(summary.limit)}
+                  <div className="flex space-x-2">
+                    <button onClick={() => handleEdit(budget)}>
+                      <Pencil className="h-5 w-5 text-blue-600" />
+                    </button>
+                    <button onClick={() => handleDelete(budget.id)}>
+                      <Trash2 className="h-5 w-5 text-red-600" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-2xl font-bold text-gray-900 mb-2">
+                  {formatCurrency(budget.limit)}
+                </p>
+                <p className="text-sm text-gray-500">Limite mensal</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Resumo e Sugestões */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Resumo do Mês Atual</h2>
+            <div className="space-y-6">
+              {getBudgetSummaries().map(summary => (
+                <div key={summary.category} className="border-b pb-4 last:border-0">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="font-medium text-gray-900">
+                        {transactionCategories.find(cat => cat.id === summary.category)?.label}
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        {formatCurrency(summary.currentSpent)} de {formatCurrency(summary.limit)}
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 rounded-full text-sm font-medium
+                      ${summary.status === 'success' ? 'bg-green-100 text-green-800' : 
+                        summary.status === 'warning' ? 'bg-yellow-100 text-yellow-800' : 
+                        'bg-red-100 text-red-800'}`}>
+                      {summary.percentage.toFixed(0)}%
+                    </span>
+                  </div>
+                  <p className={`text-sm
+                    ${summary.status === 'success' ? 'text-green-600' : 
+                      summary.status === 'warning' ? 'text-yellow-600' : 
+                      'text-red-600'}`}>
+                    {summary.message}
                   </p>
                 </div>
-                <span className={`px-2 py-1 rounded-full text-sm font-medium
-                  ${summary.status === 'success' ? 'bg-green-100 text-green-800' : 
-                    summary.status === 'warning' ? 'bg-yellow-100 text-yellow-800' : 
-                    'bg-red-100 text-red-800'}`}>
-                  {summary.percentage.toFixed(0)}%
-                </span>
-              </div>
-              <p className={`text-sm
-                ${summary.status === 'success' ? 'text-green-600' : 
-                  summary.status === 'warning' ? 'text-yellow-600' : 
-                  'text-red-600'}`}>
-                {summary.message}
-              </p>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
 
-      {/* Modal de Orçamento (simplificado) */}
+      {/* Modal de Orçamento */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -315,19 +373,11 @@ export default function Budget() {
                 <label className="block text-sm font-medium text-gray-700">
                   Limite Mensal
                 </label>
-                <div className="relative mt-1">
-
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500">
-                    R$
-                  </span>
-                <input
-                  type="text"
+                <CurrencyInput
                   value={formData.limit}
                   onChange={(e) => handleCurrencyInput(e.target.value)}
-                  className="pl-8 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   required
                 />
-              </div>
               </div>
 
               <div className="flex justify-end space-x-3">
