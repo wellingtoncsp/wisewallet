@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, getDocs, addDoc, updateDoc, deleteDoc, doc, where } from 'firebase/firestore';
+import { collection, query, getDocs, addDoc, updateDoc, deleteDoc, doc, where, orderBy } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useAlerts } from '../contexts/AlertContext';
 import { Plus, Pencil, Trash2, ArrowUpCircle, ArrowDownCircle, Receipt } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { transactionCategories } from '../utils/categories';
 import { useFormatCurrency } from '../utils/formatCurrency';
 import { CurrencyInput } from '../components/CurrencyInput';
+import { DateInput } from '../components/DateInput';
+import { format,  startOfMonth, endOfMonth } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+
 
 interface Transaction {
   id: string;
@@ -48,52 +51,65 @@ export default function Transactions() {
   const fetchTransactions = async () => {
     if (!user || !currentWallet) return;
 
-    const transactionsRef = collection(db, 'transactions');
-    let q;
-    
-    if (isSharedWallet(currentWallet.id)) {
-      // Para carteiras compartilhadas, buscar por walletId
-      q = query(
-        transactionsRef, 
-        where('walletId', '==', currentWallet.id)
-      );
-    } else {
-      // Para carteiras próprias, buscar por userId e walletId
-      q = query(
-        transactionsRef, 
-        where('walletId', '==', currentWallet.id),
-        where('userId', '==', user.uid)
-      );
+    try {
+      const transactionsRef = collection(db, 'transactions');
+      let q;
+      
+      if (isSharedWallet(currentWallet.id)) {
+        q = query(
+          transactionsRef, 
+          where('walletId', '==', currentWallet.id),
+          orderBy('date', 'desc')
+        );
+      } else {
+        q = query(
+          transactionsRef, 
+          where('walletId', '==', currentWallet.id),
+          where('userId', '==', user.uid),
+          orderBy('date', 'desc')
+        );
+      }
+
+      const querySnapshot = await getDocs(q);
+      const transactionsData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date.toDate()
+      })) as Transaction[];
+
+      setTransactions(transactionsData);
+    } catch (error) {
+      console.error('Erro ao buscar transações:', error);
+      if (error instanceof Error && error.message.includes('index')) {
+        console.log('É necessário criar um índice no Firestore');
+      }
     }
-
-    const querySnapshot = await getDocs(q);
-    const transactionsData = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      date: doc.data().date.toDate()
-    })) as Transaction[];
-
-    setTransactions(transactionsData);
   };
 
-  const formatCurrencyInput = (value: string | number) => {
-    // Se for string, limpar caracteres não numéricos
-    const numericValue = typeof value === 'string' ? 
-      Number(value.replace(/\D/g, '')) / 100 : 
-      value;
-    
-    return new Intl.NumberFormat('pt-BR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numericValue);
-  };
+  const handleAmountChange = (value: any) => {
+    try {
+      // Garante que o valor é uma string
+      const stringValue = String(value?.target?.value || value || '');
+      
+      // Remove tudo que não é número
+      const numericValue = stringValue.replace(/\D/g, '');
+      
+      // Converte para número e divide por 100 para ter os centavos
+      const amount = Number(numericValue) / 100;
+      
+      // Formata usando Intl
+      const formattedValue = new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
 
-  const handleAmountChange = (value: string) => {
-    const formattedValue = formatCurrencyInput(value);
-    setFormData(prev => ({
-      ...prev,
-      amount: formattedValue
-    }));
+      setFormData(prev => ({
+        ...prev,
+        amount: formattedValue
+      }));
+    } catch (error) {
+      console.error('Erro ao formatar valor:', error);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -101,35 +117,50 @@ export default function Transactions() {
     if (!user || !currentWallet) return;
 
     try {
-      const amount = Number(formData.amount.replace(/\D/g, '')) / 100;
-      
-      // Criar a data usando parseISO e ajustar para meio-dia no horário local
-      const localDate = parseISO(formData.date);
-      const date = new Date(
-        localDate.getFullYear(),
-        localDate.getMonth(),
-        localDate.getDate(),
-        12, // meio-dia
-        0,
-        0,
-        0
-      );
-
-      const newTransaction = {
+      const transactionData = {
+        amount: Number(formData.amount.replace(/\D/g, '')) / 100,
         description: formData.description,
-        amount,
-        type: formData.type,
+        date: new Date(formData.date),
+        type: formData.type as 'income' | 'expense',
         category: formData.category,
-        date,
         userId: user.uid,
         walletId: currentWallet.id
       };
 
       if (editingTransaction) {
-        const transactionRef = doc(db, 'transactions', editingTransaction.id);
-        await updateDoc(transactionRef, newTransaction);
+        await updateDoc(doc(db, 'transactions', editingTransaction.id), transactionData);
       } else {
-        await addDoc(collection(db, 'transactions'), newTransaction);
+        await addDoc(collection(db, 'transactions'), transactionData);
+      }
+
+      // Notificar transações grandes
+      if (transactionData.amount >= 1000) {
+        console.log('Criando alerta de transação grande:', transactionData);
+        await createAlert('transaction_large', {
+          type: transactionData.type,
+          amount: formatCurrency(transactionData.amount)
+        }, currentWallet.id);
+      }
+
+      // Verificar padrões de gastos
+      if (transactionData.type === 'expense') {
+        const categoryTransactions = transactions.filter(t => 
+          t.category === transactionData.category &&
+          t.type === 'expense'
+        );
+
+        console.log('Transações da categoria:', categoryTransactions);
+
+        if (categoryTransactions.length >= 3) {
+          const totalAmount = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
+          console.log('Total gasto na categoria:', totalAmount);
+          
+          if (totalAmount > 2000) {
+            await createAlert('spending_pattern', {
+              category: transactionData.category
+            }, currentWallet.id);
+          }
+        }
       }
 
       setIsModalOpen(false);
@@ -138,33 +169,8 @@ export default function Transactions() {
       fetchTransactions();
       setSuccess('Transação salva com sucesso!');
 
-      // Notificar transações grandes
-      if (amount >= 1000) {
-        await createAlert('transaction_large', {
-          type: newTransaction.type,
-          amount: formatCurrency(amount)
-        }, currentWallet.id);
-      }
-
-      // Verificar padrões de gastos
-      if (newTransaction.type === 'expense') {
-        const categoryTransactions = transactions.filter(t => 
-          t.category === newTransaction.category &&
-          t.type === 'expense'
-        );
-
-        if (categoryTransactions.length >= 3) {
-          const totalAmount = categoryTransactions.reduce((sum, t) => sum + t.amount, 0);
-          if (totalAmount > 2000) {
-            await createAlert('spending_pattern', {
-              category: newTransaction.category
-            }, currentWallet.id);
-          }
-        }
-      }
-
       // Verificar sequência de economia
-      if (newTransaction.type === 'income') {
+      if (transactionData.type === 'income') {
         const lastMonthExpenses = transactions
           .filter(t => 
             t.type === 'expense' && 
@@ -172,7 +178,7 @@ export default function Transactions() {
           )
           .reduce((sum, t) => sum + t.amount, 0);
 
-        if (lastMonthExpenses < amount * 0.7) {
+        if (lastMonthExpenses < transactionData.amount * 0.7) {
           await createAlert('saving_streak', {
             days: 30
           }, currentWallet.id);
@@ -180,7 +186,7 @@ export default function Transactions() {
       }
     } catch (error) {
       console.error('Erro ao salvar transação:', error);
-      setError('Erro ao salvar transação. Tente novamente.');
+      setError('Erro ao salvar transação');
     }
   };
 
@@ -195,7 +201,10 @@ export default function Transactions() {
   const handleEdit = (transaction: Transaction) => {
     setEditingTransaction(transaction);
     setFormData({
-      amount: formatCurrencyInput(transaction.amount),
+      amount: new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(transaction.amount),
       description: transaction.description,
       date: format(transaction.date, 'yyyy-MM-dd'),
       type: transaction.type,
@@ -243,19 +252,24 @@ export default function Transactions() {
     generateMonthlySummary();
   }, [transactions]);
 
+  // Função para abrir o modal de nova transação
+  const handleNewTransaction = () => {
+    setEditingTransaction(null);
+    resetForm();
+    setIsModalOpen(true);
+  };
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center mb-8">
-        <Receipt className="h-8 w-8 text-purple-500 mr-3" />
-        <h1 className="text-3xl font-bold text-gray-900">Transações</h1>
-      </div>
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center">
+          <Receipt className="h-6 w-6 text-blue-500 mr-2" />
+          <h1 className="text-2xl font-bold text-gray-900">Transações</h1>
+        </div>
+        
         <button
-          onClick={() => {
-            resetForm();
-            setIsModalOpen(true);
-          }}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          onClick={handleNewTransaction}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           <Plus className="h-5 w-5 mr-2" />
           Nova Transação
@@ -264,87 +278,88 @@ export default function Transactions() {
 
       {/* Lista de transações */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <div className="divide-y divide-gray-200">
-          {transactions.map(transaction => (
-            <div 
-              key={transaction.id} 
-              className="p-4 hover:bg-gray-50 transition-colors"
-            >
-              {/* Layout adaptativo para mobile */}
-              <div className="flex flex-col sm:flex-row gap-3">
-                {/* Ícone e informações principais */}
-                <div className="flex items-start gap-3 flex-1">
-                  <div className={`p-2 rounded-lg flex-shrink-0 ${
-                    transaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
-                  }`}>
-                    {transaction.type === 'income' ? (
-                      <ArrowUpCircle className="h-6 w-6 text-green-600" />
-                    ) : (
-                      <ArrowDownCircle className="h-6 w-6 text-red-600" />
-                    )}
+        {transactions.length === 0 ? (
+          <div className="text-center py-8">
+            <Receipt className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+            <p className="text-gray-500">Nenhuma transação registrada</p>
+            <p className="text-sm text-gray-400">
+              Clique em "Nova Transação" para começar a registrar suas movimentações
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-200">
+            {transactions.map(transaction => (
+              <div 
+                key={transaction.id} 
+                className="p-4 hover:bg-gray-50 transition-colors"
+              >
+                {/* Layout adaptativo para mobile */}
+                <div className="flex flex-col sm:flex-row gap-3">
+                  {/* Ícone e informações principais */}
+                  <div className="flex items-start gap-3 flex-1">
+                    <div className={`p-2 rounded-lg flex-shrink-0 ${
+                      transaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
+                    }`}>
+                      {transaction.type === 'income' ? (
+                        <ArrowUpCircle className="h-6 w-6 text-green-600" />
+                      ) : (
+                        <ArrowDownCircle className="h-6 w-6 text-red-600" />
+                      )}
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">
+                        {transaction.description}
+                      </p>
+                      <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-sm text-gray-500">
+                        <span>{format(transaction.date, 'dd/MM/yyyy', { locale: ptBR })}</span>
+                        <span className="hidden sm:inline">•</span>
+                        <span>{transactionCategories.find(cat => cat.id === transaction.category)?.label || transaction.category}</span>
+                      </div>
+                    </div>
                   </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">
-                      {transaction.description}
-                    </p>
-                    <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-sm text-gray-500">
-                      <span>{format(transaction.date, 'dd/MM/yyyy')}</span>
-                      <span className="hidden sm:inline">•</span>
-                      <span>{transactionCategories.find(cat => cat.id === transaction.category)?.label || transaction.category}</span>
+
+                  {/* Valor e ações */}
+                  <div className="flex items-center justify-between sm:justify-end gap-3 mt-2 sm:mt-0">
+                    <span className={`text-sm font-medium ${
+                      transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {transaction.type === 'income' ? '+' : '-'} 
+                      {formatCurrency(transaction.amount)}
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleEdit(transaction)}
+                        className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                        title="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(transaction.id)}
+                        className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
-
-                {/* Valor e ações */}
-                <div className="flex items-center justify-between sm:justify-end gap-3 mt-2 sm:mt-0">
-                  <span className={`text-sm font-medium ${
-                    transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {transaction.type === 'income' ? '+' : '-'} 
-                    {formatCurrency(transaction.amount)}
-                  </span>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleEdit(transaction)}
-                      className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                      title="Editar"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(transaction.id)}
-                      className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
-                      title="Excluir"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
               </div>
-            </div>
-          ))}
-
-          {transactions.length === 0 && (
-            <div className="p-8 text-center">
-              <Receipt className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">Nenhuma transação encontrada</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Tente ajustar os filtros ou adicione uma nova transação
-              </p>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Modal de Formulário */}
+      {/* Modal de Transação */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <h2 className="text-xl font-semibold mb-4">
-              {editingTransaction ? 'Editar Transação' : 'Nova Transação'}
+              {editingTransaction ? 'Editar' : 'Nova'} Transação
             </h2>
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">
@@ -367,7 +382,7 @@ export default function Transactions() {
                 </label>
                 <CurrencyInput
                   value={formData.amount}
-                  onChange={(e) => handleAmountChange(e.target.value)}
+                  onChange={handleAmountChange}
                   required
                 />
               </div>
@@ -381,6 +396,17 @@ export default function Transactions() {
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Data <span className="text-red-500">*</span>
+                </label>
+                <DateInput
+                  value={formData.date}
+                  onChange={(value) => setFormData({ ...formData, date: value })}
+                  required
                 />
               </div>
 
@@ -403,29 +429,13 @@ export default function Transactions() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Data <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="text-sm text-gray-500">
-                <span className="text-red-500">*</span> Campos obrigatórios
-              </div>
-
               <div className="flex justify-end space-x-3 mt-6">
                 <button
                   type="button"
                   onClick={() => {
                     setIsModalOpen(false);
                     setEditingTransaction(null);
+                    resetForm();
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 border border-gray-300 rounded-md"
                 >

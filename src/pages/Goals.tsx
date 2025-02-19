@@ -4,11 +4,12 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useAlerts } from '../contexts/AlertContext';
-import { Plus, Pencil, Trash2, Target, Check, Trophy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Target, Check} from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useFormatCurrency } from '../utils/formatCurrency';
 import { CurrencyInput } from '../components/CurrencyInput';
+import { DateInput } from '../components/DateInput';
 
 interface Goal {
   id: string;
@@ -45,6 +46,7 @@ export default function Goals() {
   const [shouldCreateTransaction, setShouldCreateTransaction] = useState(false);
   const formatCurrency = useFormatCurrency();
   const [goalsProgress, setGoalsProgress] = useState<Record<string, number>>({});
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user && currentWallet) {
@@ -169,21 +171,6 @@ export default function Goals() {
     checkGoalsProgress();
   }, [currentBalance]);
 
-  const calculateCurrentBalance = async () => {
-    if (!user) return;
-
-    const transactionsRef = collection(db, 'transactions');
-    const q = query(transactionsRef, where('userId', '==', user.uid));
-    const querySnapshot = await getDocs(q);
-    
-    const transactions = querySnapshot.docs.map(doc => doc.data()) as Transaction[];
-    
-    const balance = transactions.reduce((sum, transaction) => {
-      return sum + (transaction.type === 'income' ? transaction.amount : -transaction.amount);
-    }, 0);
-
-    setCurrentBalance(balance);
-  };
 
   const fetchGoals = async () => {
     if (!user || !currentWallet) return;
@@ -225,67 +212,6 @@ export default function Goals() {
     setCompletedGoals(completedGoals);
   };
 
-  const fetchTransactions = async () => {
-    if (!user || !currentWallet) return;
-
-    try {
-      const transactionsRef = collection(db, 'transactions');
-      const q = query(
-        transactionsRef,
-        where('walletId', '==', currentWallet.id)
-      );
-
-      const querySnapshot = await getDocs(q);
-      const transactions = querySnapshot.docs.map(doc => ({
-        ...doc.data(),
-        date: doc.data().date.toDate(),
-        amount: doc.data().amount,
-        type: doc.data().type
-      })) as Transaction[];
-
-      // Calcular saldo total
-      let totalBalance = transactions.reduce((sum, t) => {
-        return sum + (t.type === 'income' ? t.amount : -t.amount);
-      }, 0);
-
-      // Ordenar metas por prioridade e valor
-      const sortedGoals = [...goals].sort((a, b) => {
-        if (a.priority !== b.priority) {
-          return a.priority - b.priority;
-        }
-        return a.target_amount - b.target_amount;
-      });
-
-      // Calcular progresso respeitando a ordem de prioridade
-      const progress: Record<string, number> = {};
-      let remainingBalance = totalBalance;
-
-      sortedGoals.forEach(goal => {
-        // Se não há saldo, meta tem 0% de progresso
-        if (remainingBalance <= 0) {
-          progress[goal.id] = 0;
-          return;
-        }
-
-        // Calcular quanto da meta atual pode ser preenchida
-        const amountForThisGoal = Math.min(remainingBalance, goal.target_amount);
-        const goalProgress = (amountForThisGoal / goal.target_amount) * 100;
-        progress[goal.id] = goalProgress;
-
-        // Subtrair do saldo disponível apenas se a meta foi completamente preenchida
-        if (amountForThisGoal >= goal.target_amount) {
-          remainingBalance -= goal.target_amount;
-        } else {
-          // Se a meta não foi completamente preenchida, usar todo o saldo restante
-          remainingBalance = 0;
-        }
-      });
-
-      setGoalsProgress(progress);
-    } catch (error) {
-      console.error('Erro ao buscar transações:', error);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,10 +234,10 @@ export default function Goals() {
       await addDoc(collection(db, 'goals'), goal);
     }
 
+    await updateGoalsData();
     setIsModalOpen(false);
     setEditingGoal(null);
     resetForm();
-    fetchGoals();
   };
 
   const handleDelete = async (id: string) => {
@@ -342,58 +268,7 @@ export default function Goals() {
     });
   };
 
-  const calculateGoalProgress = (goalIndex: number, targetAmount: number) => {
-    let remainingBalance = currentBalance;
-    
-    // Subtrair os valores das metas anteriores
-    for (let i = 0; i < goalIndex; i++) {
-      if (remainingBalance <= 0) break;
-      remainingBalance -= Math.min(remainingBalance, goals[i].target_amount);
-    }
 
-    // Calcular o progresso da meta atual
-    const currentGoalProgress = Math.min(remainingBalance, targetAmount);
-    return Math.max(0, (currentGoalProgress / targetAmount) * 100);
-  };
-
-  const getGoalProgressAmount = (goalIndex: number, targetAmount: number) => {
-    let remainingBalance = currentBalance;
-    
-    // Subtrair os valores das metas anteriores
-    for (let i = 0; i < goalIndex; i++) {
-      if (remainingBalance <= 0) break;
-      remainingBalance -= Math.min(remainingBalance, goals[i].target_amount);
-    }
-
-    // Retornar o valor disponível para a meta atual
-    return Math.max(0, Math.min(remainingBalance, targetAmount));
-  };
-
-  const getPriorityLabel = (priority: number) => {
-    switch (priority) {
-      case 1:
-        return 'Alta';
-      case 2:
-        return 'Média';
-      case 3:
-        return 'Baixa';
-      default:
-        return 'Média';
-    }
-  };
-
-  const getPriorityColor = (priority: number) => {
-    switch (priority) {
-      case 1:
-        return 'text-red-600';
-      case 2:
-        return 'text-yellow-600';
-      case 3:
-        return 'text-green-600';
-      default:
-        return 'text-yellow-600';
-    }
-  };
 
   const openCompleteModal = (goal: Goal) => {
     setSelectedGoal(goal);
@@ -401,12 +276,13 @@ export default function Goals() {
     setShouldCreateTransaction(false);
   };
 
-  const handleCompleteGoal = async (goal: Goal) => {
+  const handleCompleteGoal = async (goalId: string, createTransaction: boolean) => {
     if (!user || !currentWallet) return;
 
     try {
+      console.log('Completando meta:', goalId); // Debug
       // Atualizar o status da meta no Firestore
-      const goalRef = doc(db, 'goals', goal.id);
+      const goalRef = doc(db, 'goals', goalId);
       await updateDoc(goalRef, {
         completed: true,
         completedAt: new Date()
@@ -414,8 +290,8 @@ export default function Goals() {
 
       // Criar notificação de meta alcançada
       await createAlert('goal_achieved', {
-        goalName: goal.name,
-        targetAmount: goal.target_amount
+        goalName: selectedGoal?.name,
+        targetAmount: selectedGoal?.target_amount
       }, currentWallet.id);
 
       // Atualizar a lista de metas
@@ -429,20 +305,26 @@ export default function Goals() {
       setSelectedGoal(null);
 
       // Opcional: Criar transação se o usuário escolheu
-      if (shouldCreateTransaction) {
-        const transactionsRef = collection(db, 'transactions');
-        await addDoc(transactionsRef, {
-          amount: goal.target_amount,
-          description: `Meta alcançada: ${goal.name}`,
-          category: 'savings', // ou categoria específica para metas
-          type: 'income',
+      if (createTransaction) {
+        if (!user || !currentWallet) return;
+
+        const transactionData = {
+          amount: selectedGoal?.target_amount,
+          type: 'expense',
+          description: `Meta concluída: ${selectedGoal?.name}`,
+          category: 'savings',
           date: new Date(),
           userId: user.uid,
           walletId: currentWallet.id
-        });
+        };
+
+        await addDoc(collection(db, 'transactions'), transactionData);
       }
+
+      console.log('Meta concluída e alerta criado'); // Debug
     } catch (error) {
-      console.error('Erro ao concluir meta:', error);
+      console.error('Erro ao completar meta:', error);
+      setError('Erro ao completar meta');
     }
   };
 
@@ -529,6 +411,68 @@ export default function Goals() {
     }
     return a.target_amount - b.target_amount;
   });
+
+  const updateGoalsData = async () => {
+    if (!user || !currentWallet) return;
+    
+    try {
+      // Buscar transações para calcular saldo
+      const transactionsRef = collection(db, 'transactions');
+      const transactionsQuery = query(
+        transactionsRef,
+        where('walletId', '==', currentWallet.id)
+      );
+
+      const transactionsSnapshot = await getDocs(transactionsQuery);
+      const transactions = transactionsSnapshot.docs.map(doc => ({
+        ...doc.data(),
+        amount: doc.data().amount,
+        type: doc.data().type
+      }));
+
+      // Calcular saldo total
+      const totalBalance = transactions.reduce((sum, t) => {
+        return sum + (t.type === 'income' ? t.amount : -t.amount);
+      }, 0);
+      setCurrentBalance(totalBalance);
+
+      // Buscar metas ativas
+      const goalsRef = collection(db, 'goals');
+      const goalsQuery = query(
+        goalsRef,
+        where('walletId', '==', currentWallet.id),
+        where('completed', '==', false)
+      );
+
+      const goalsSnapshot = await getDocs(goalsQuery);
+      const goalsData = goalsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        deadline: doc.data().deadline.toDate()
+      })) as Goal[];
+
+      // Ordenar e calcular progresso
+      const sortedGoals = [...goalsData].sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        return a.deadline.getTime() - b.deadline.getTime();
+      });
+
+      let remainingBalance = totalBalance;
+      const progress: Record<string, number> = {};
+
+      sortedGoals.forEach(goal => {
+        const amountForThisGoal = Math.min(remainingBalance, goal.target_amount);
+        const goalProgress = (amountForThisGoal / goal.target_amount) * 100;
+        progress[goal.id] = Math.max(0, Math.min(100, goalProgress));
+        remainingBalance = Math.max(0, remainingBalance - goal.target_amount);
+      });
+
+      setGoals(sortedGoals);
+      setGoalsProgress(progress);
+    } catch (error) {
+      console.error('Erro ao atualizar dados:', error);
+    }
+  };
 
   return (
     <div className="p-3 sm:p-6 max-w-7xl mx-auto">
@@ -641,14 +585,12 @@ export default function Goals() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">
-                  Data prevista para alcançar a meta
+                  Data Limite <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="date"
-                  required
+                <DateInput
                   value={formData.deadline}
-                  onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  onChange={(value) => setFormData({ ...formData, deadline: value })}
+                  required
                 />
               </div>
 
@@ -709,7 +651,7 @@ export default function Goals() {
                 Cancelar
               </button>
               <button
-                onClick={() => handleCompleteGoal(selectedGoal)}
+                onClick={() => handleCompleteGoal(selectedGoal.id, shouldCreateTransaction)}
                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
               >
                 Concluir Meta

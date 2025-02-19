@@ -4,10 +4,9 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useAlerts } from '../contexts/AlertContext';
-import { Plus, Pencil, Trash2, AlertTriangle, PiggyBank } from 'lucide-react';
-import { format, parseISO, startOfDay, endOfDay, lastDayOfMonth, startOfMonth } from 'date-fns';
+import { Plus, Pencil, Trash2, PiggyBank } from 'lucide-react';
+import { endOfDay, lastDayOfMonth, startOfMonth } from 'date-fns';
 import { transactionCategories, getCategoryLabel } from '../utils/categories';
-import { ptBR } from 'date-fns/locale';
 import { useFormatCurrency } from '../utils/formatCurrency';
 import { CurrencyInput } from '../components/CurrencyInput';
 
@@ -242,18 +241,7 @@ export default function Budget() {
     });
   };
 
-  const handleAddTransaction = async (transaction: Transaction) => {
-    // ... código existente ...
 
-    // Verificar limites do orçamento
-    const budget = budgets.find(b => b.category === transaction.category);
-    if (budget) {
-      const currentSpent = transactions
-        .filter(t => t.category === transaction.category)
-        .reduce((sum, t) => sum + t.amount, 0);
-      await checkAllBudgets();
-    }
-  };
 
   const renderBudgetItem = (budget: Budget) => (
     <div key={budget.id} className="bg-white rounded-xl shadow-sm p-6">

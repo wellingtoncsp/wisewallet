@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { User, Lock, Users, UserPlus, X, Wallet, Plus, Edit2, Trash2 } from 'lucide-react';
-import { collection, query, where, getDocs, addDoc, deleteDoc, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { User, Lock, Users, Wallet, Plus, Edit2, Trash2 } from 'lucide-react';
+import { collection, query, where, getDocs, doc,  getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { FamilyMember } from '../types/user';
 import { useWallet } from '../contexts/WalletContext';
@@ -250,9 +250,7 @@ export default function Profile() {
   const [isEditing, setIsEditing] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   
-  const [isFamilyModalOpen, setIsFamilyModalOpen] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
-  const [inviteEmail, setInviteEmail] = useState('');
   const [formData, setFormData] = useState({
     name: userProfile?.name || '',
     birthDate: userProfile?.birthDate || '',
@@ -328,65 +326,9 @@ export default function Profile() {
     }
   };
 
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userProfile?.familyId) {
-      // Create new family group if user doesn't have one
-      const familyRef = await addDoc(collection(db, 'families'), {
-        createdBy: userProfile?.uid,
-        createdAt: new Date()
-      });
+  
 
-      await updateUserProfile({
-        familyId: familyRef.id,
-        isHeadOfFamily: true
-      });
 
-      // Add current user as head of family
-      await addDoc(collection(db, 'familyMembers'), {
-        familyId: familyRef.id,
-        userId: userProfile?.uid,
-        name: userProfile?.name,
-        email: userProfile?.email,
-        role: 'head',
-        joinedAt: new Date()
-      });
-    }
-
-    // Create invitation
-    await addDoc(collection(db, 'familyInvitations'), {
-      familyId: userProfile?.familyId,
-      email: inviteEmail,
-      invitedBy: userProfile?.uid,
-      status: 'pending',
-      createdAt: new Date()
-    });
-
-    setInviteEmail('');
-    setSuccess('Convite enviado com sucesso!');
-  };
-
-  const handleRemoveMember = async (memberId: string) => {
-    if (!confirm('Tem certeza que deseja remover este membro da família?')) return;
-
-    const memberRef = doc(db, 'familyMembers', memberId);
-    await deleteDoc(memberRef);
-    
-    // Update user profile to remove family association
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('familyId', '==', userProfile?.familyId));
-    const snapshot = await getDocs(q);
-    
-    if (!snapshot.empty) {
-      const userDoc = snapshot.docs[0];
-      await updateDoc(doc(db, 'users', userDoc.id), {
-        familyId: null,
-        isHeadOfFamily: false
-      });
-    }
-
-    fetchFamilyMembers();
-  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;

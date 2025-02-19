@@ -1,5 +1,5 @@
 {/* Remover o gráfico de evolução financeira */}
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,23 +7,19 @@ import { useWallet } from '../contexts/WalletContext';
 import { 
   ArrowUpCircle, 
   ArrowDownCircle, 
-  Target, 
-  Download, 
   TrendingUp, 
   TrendingDown,
   LayoutDashboard, 
   PiggyBank 
 } from 'lucide-react';
-import { format, subMonths, startOfMonth, endOfMonth, isFuture, isPast, isToday, isWithinInterval } from 'date-fns';
-import jsPDF from 'jspdf';
+import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 import 'jspdf-autotable';
-import * as XLSX from 'xlsx';
 import { transactionCategories } from '../utils/categories';
 import { ptBR } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
 import { useFormatCurrency } from '../utils/formatCurrency';
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, 
+   XAxis, YAxis, CartesianGrid, 
   Tooltip, ResponsiveContainer, Area, AreaChart 
 } from 'recharts';
 
@@ -70,16 +66,9 @@ export default function Dashboard() {
   const { currentWallet } = useWallet();
   const [monthlyIncome, setMonthlyIncome] = useState(0);
   const [monthlyExpenses, setMonthlyExpenses] = useState(0);
-  const [goals, setGoals] = useState<Goal[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [currentBalance, setCurrentBalance] = useState(0);
-  const [filterDates, setFilterDates] = useState({
-    startDate: format(subMonths(new Date(), 1), 'yyyy-MM-dd'),
-    endDate: format(new Date(), 'yyyy-MM-dd')
-  });
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [upcomingGoals, setUpcomingGoals] = useState<Goal[]>([]);
-  const [upcomingBills, setUpcomingBills] = useState<Transaction[]>([]);
   const [monthlyTrend, setMonthlyTrend] = useState({
     previousMonth: { income: 0, expenses: 0 },
     currentMonth: { income: 0, expenses: 0 }
@@ -283,107 +272,6 @@ export default function Dashboard() {
     }
   };
 
-  const fetchGoals = async () => {
-    if (!user || !currentWallet) return;
-
-    try {
-      const goalsRef = collection(db, 'goals');
-      const q = query(
-        goalsRef, 
-        where('userId', '==', user.uid),
-        where('walletId', '==', currentWallet.id)
-      );
-      
-      const querySnapshot = await getDocs(q);
-      
-      const goals = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          deadline: data.deadline.toDate(),
-          completed: data.completed || false
-        };
-      }) as Goal[];
-
-      // Filtrar apenas metas não concluídas
-      const activeMetas = goals.filter(goal => !goal.completed);
-      console.log('Metas ativas:', activeMetas);
-
-      // Ordenar por prioridade e valor
-      const orderedGoals = activeMetas
-        .sort((a, b) => {
-          // Primeiro por prioridade
-          if (a.priority !== b.priority) {
-            return a.priority - b.priority;
-          }
-          // Depois por valor (menor para maior)
-          return a.target_amount - b.target_amount;
-        })
-        .slice(0, 3); // Limitar a 3 metas
-
-      console.log('Metas ordenadas (max 3):', orderedGoals);
-      setUpcomingGoals(orderedGoals);
-
-    } catch (error) {
-      console.error('Erro ao buscar metas:', error);
-    }
-  };
-
-  const fetchUpcomingBills = async () => {
-    if (!user) return;
-
-    const now = new Date();
-    const endOfNextMonth = endOfMonth(subMonths(now, -1));
-
-    const transactionsRef = collection(db, 'transactions');
-    const q = query(
-      transactionsRef,
-      where('userId', '==', user.uid),
-      where('type', '==', 'expense'),
-      where('category', '==', 'bills')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    const bills = querySnapshot.docs
-      .map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        date: doc.data().date.toDate()
-      }))
-      .filter(bill => 
-        (isFuture(bill.date) || isToday(bill.date)) && 
-        bill.date <= endOfNextMonth
-      )
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-      .slice(0, 5) as Transaction[];
-
-    setUpcomingBills(bills);
-  };
-
-  const fetchBudgets = async () => {
-    if (!user || !currentWallet) return;
-
-    try {
-      const budgetsRef = collection(db, 'budgets');
-      const q = query(
-        budgetsRef, 
-        where('userId', '==', user.uid),
-        where('walletId', '==', currentWallet.id)
-      );
-      
-      const querySnapshot = await getDocs(q);
-      const budgetsData = querySnapshot.docs.map(doc => ({
-        ...doc.data()
-      })) as Budget[];
-
-      console.log('Debug - Orçamentos carregados:', budgetsData);
-      
-      setBudgets(budgetsData);
-    } catch (error) {
-      console.error('Erro ao buscar orçamentos:', error);
-    }
-  };
 
   return (
     <div className="p-3 sm:p-6 max-w-7xl mx-auto">
@@ -709,6 +597,21 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+{/* 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-sm font-medium text-gray-500 mb-1">Saldo Total Atual</h3>
+          <p className={`text-2xl font-semibold ${currentBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {formatCurrency(currentBalance)}
+          </p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-sm font-medium text-gray-500 mb-1">Saldo Total Futuro</h3>
+          <p className={`text-2xl font-semibold ${futureBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {formatCurrency(futureBalance)}
+          </p>
+        </div>
+      </div> */}
     </div>
   );
 }

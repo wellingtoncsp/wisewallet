@@ -1,26 +1,27 @@
 import React, { useState, useEffect } from 'react';
+import { getDoc, doc, collection, query, where, getDocs } from 'firebase/firestore';
 
 import { Users,  X, Share2, Check } from 'lucide-react';
 import { useWallet } from '../contexts/WalletContext';
 import { useAlerts } from '../contexts/AlertContext';
+import { db } from '../lib/firebase';
 
 interface SharedByUser {
   name: string;
   email: string;
 }
 
-interface ShareData {
+
+interface UserDetails {
   id: string;
-  sharedByUser: SharedByUser;
-  sharedByUserId: string;
-  sharedWithEmail: string;
-  walletId: string;
-  status: 'pending' | 'accepted' | 'rejected';
+  name: string;
+  email: string;
 }
 
 export default function Family() {
   const { 
     wallets,
+    sharedWallets,
     shareWallet, 
     pendingShares,
     acceptShare,
@@ -40,12 +41,79 @@ export default function Family() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedWalletId, setSelectedWalletId] = useState('');
   const [email, setEmail] = useState('');
+  const [userDetails, setUserDetails] = useState<Record<string, UserDetails>>({});
+  const [sharedWithUsers, setSharedWithUsers] = useState<Record<string, { name: string; email: string }>>({});
 
   useEffect(() => {
     if (pendingShares.length > 0) {
       console.log('Dados do compartilhamento:', pendingShares);
     }
   }, [pendingShares]);
+
+  // Função para buscar detalhes do usuário
+  const fetchUserDetails = async (userId: string) => {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setUserDetails(prev => ({
+          ...prev,
+          [userId]: {
+            id: userId,
+            name: userData.name,
+            email: userData.email
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Erro ao buscar detalhes do usuário:', error);
+    }
+  };
+
+  // Função para buscar detalhes do usuário que recebeu o compartilhamento
+  const fetchSharedWithUserDetails = async (email: string) => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const userData = querySnapshot.docs[0].data();
+        return {
+          name: userData.name,
+          email: userData.email
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Erro ao buscar detalhes do usuário:', error);
+      return null;
+    }
+  };
+
+  // Buscar detalhes dos usuários quando o componente montar
+  useEffect(() => {
+    sharedWallets.forEach(wallet => {
+      if (wallet.userId && !userDetails[wallet.userId]) {
+        fetchUserDetails(wallet.userId);
+      }
+    });
+  }, [sharedWallets]);
+
+  // Buscar detalhes dos usuários quando o componente montar
+  useEffect(() => {
+    activeShares.forEach(async (share) => {
+      if (share.sharedWithEmail && !sharedWithUsers[share.sharedWithEmail]) {
+        const userDetails = await fetchSharedWithUserDetails(share.sharedWithEmail);
+        if (userDetails) {
+          setSharedWithUsers(prev => ({
+            ...prev,
+            [share.sharedWithEmail]: userDetails
+          }));
+        }
+      }
+    });
+  }, [activeShares]);
 
   const handleAcceptShare = async (shareId: string) => {
     try {
@@ -226,32 +294,30 @@ export default function Family() {
           </button>
         </div>
 
+      {/* Carteiras que compartilhei */}
+      <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">Carteiras que Compartilhei</h2>
         <div className="space-y-4">
           {activeShares.length > 0 ? (
             activeShares.map(share => {
               const wallet = wallets.find(w => w.id === share.walletId);
-              if (!wallet) return null;
-
               return (
-                <div key={share.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div>
-                    <h3 className="font-medium text-gray-900">{wallet.name}</h3>
-                    <p className="text-sm text-gray-500">
-                      Compartilhada com: {share.sharedWithEmail}
-                    </p>
-                    {share.sharedByUser && (
-                      <p className="text-xs text-gray-400">
-                        Compartilhada por: {share.sharedByUser.name} ({share.sharedByUser.email})
+                <div key={share.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <Share2 className="h-5 w-5 text-purple-500" />
+                    <div>
+                      <p className="font-medium text-gray-900">{wallet?.name}</p>
+                      <p className="text-sm text-gray-500">
+                        Compartilhada com: {
+                          sharedWithUsers[share.sharedWithEmail]?.name || 'Carregando...'
+                        } - {share.sharedWithEmail}
                       </p>
-                    )}
+                    </div>
                   </div>
                   <button
-                    onClick={() => {
-                      if (confirm(`Deseja remover o compartilhamento com ${share.sharedWithEmail}?`)) {
-                        removeShare(share.id);
-                      }
-                    }}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                    onClick={() => removeShare(share.id)}
+                    className="p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
+                    title="Remover compartilhamento"
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -259,15 +325,32 @@ export default function Family() {
               );
             })
           ) : (
-            <div className="text-center py-6 text-gray-500">
-              <Share2 className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-              <p>Nenhuma carteira compartilhada</p>
-            </div>
+            <p className="text-gray-500">Você não compartilhou nenhuma carteira ainda.</p>
           )}
         </div>
       </div>
 
-     
+      {/* Carteiras compartilhadas comigo */}
+      <div className="bg-white rounded-lg shadow-sm p-6">
+        <h2 className="text-xl font-semibold mb-4">Carteiras Compartilhadas Comigo</h2>
+        <div className="space-y-4">
+          {sharedWallets.length > 0 ? (
+            sharedWallets.map(wallet => (
+              <div key={wallet.id} className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+                <Users className="h-5 w-5 text-purple-500" />
+                <div>
+                  <p className="font-medium text-gray-900">{wallet.name}</p>
+                  <p className="text-sm text-gray-500">
+                  Compartilhada por: {userDetails[wallet.userId]?.name || 'Carregando...'} - {userDetails[wallet.userId]?.email || 'Carregando...'}
+                  </p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-gray-500">Nenhuma carteira foi compartilhada com você.</p>
+          )}
+        </div>
+      </div>
 
       {/* Modal de compartilhamento */}
       {isModalOpen && (
@@ -332,5 +415,7 @@ export default function Family() {
         </div>
       )}
     </div>
+    </div>
+
   );
 }

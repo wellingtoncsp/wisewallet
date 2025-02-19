@@ -9,11 +9,8 @@ import {
   TrendingUp, 
   Target, 
   List,
-  Download,
   FileText,
   PieChart,
-  Calendar,
-  Filter,
   FileType2,
   FileSpreadsheet
 } from 'lucide-react';

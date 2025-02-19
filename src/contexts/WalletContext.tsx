@@ -9,6 +9,7 @@ interface Wallet {
   name: string;
   userId: string;
   createdAt: Date;
+  shared?: boolean;
 }
 
 interface WalletShare {
@@ -30,33 +31,32 @@ interface WalletShareWithUser extends WalletShare {
 }
 
 interface WalletContextType {
-  currentWallet: Wallet | null;
   wallets: Wallet[];
-  setCurrentWallet: (wallet: Wallet) => void;
-  isLoading: boolean;
-  createWallet: (name: string) => Promise<Wallet>;
-  updateWallet: (id: string, name: string) => Promise<void>;
-  deleteWallet: (id: string) => Promise<void>;
+  sharedWallets: Wallet[];
+  currentWallet: Wallet | null;
+  setCurrentWallet: (walletId: string) => void;
+  isSharedWallet: (walletId: string) => boolean;
+  pendingShares: WalletShareWithUser[];
+  activeShares: WalletShareWithUser[];
+  sentPendingShares: WalletShareWithUser[];
   shareWallet: (walletId: string, email: string) => Promise<void>;
   acceptShare: (shareId: string) => Promise<void>;
   rejectShare: (shareId: string) => Promise<void>;
-  pendingShares: WalletShareWithUser[];
-  sharedWallets: Wallet[];
-  activeShares: WalletShareWithUser[];
   removeShare: (shareId: string) => Promise<void>;
-  sentPendingShares: WalletShareWithUser[];
-  isSharedWallet: (walletId: string) => boolean;
+  createWallet: (name: string) => Promise<void>;
+  updateWallet: (id: string, name: string) => Promise<void>;
+  deleteWallet: (id: string) => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
-  const [currentWallet, setCurrentWalletState] = useState<Wallet | null>(null);
   const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [sharedWallets, setSharedWallets] = useState<Wallet[]>([]);
+  const [currentWallet, setCurrentWallet] = useState<Wallet | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingShares, setPendingShares] = useState<WalletShareWithUser[]>([]);
-  const [sharedWallets, setSharedWallets] = useState<Wallet[]>([]);
   const [activeShares, setActiveShares] = useState<WalletShareWithUser[]>([]);
   const [sentPendingShares, setSentPendingShares] = useState<WalletShareWithUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +75,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
         const allWallets = [...wallets, ...sharedWallets];
         const savedWallet = allWallets.find(w => w.id === savedWalletId);
         if (savedWallet) {
-          setCurrentWalletState(savedWallet);
+          setCurrentWallet(savedWallet);
         }
       }
     }
@@ -104,9 +104,9 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
       if (ownedWallets.length === 0) {
         const defaultWallet = await createWallet('Carteira Principal');
         setWallets([defaultWallet]);
-        setCurrentWalletState(defaultWallet);
+        setCurrentWallet(defaultWallet);
       } else if (!currentWallet) {
-        setCurrentWalletState(ownedWallets[0]);
+        setCurrentWallet(ownedWallets[0]);
       }
 
       setIsLoading(false);
@@ -141,6 +141,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
             name: data?.name,
             userId: data?.userId,
             createdAt: data?.createdAt.toDate(),
+            shared: true
           } as Wallet;
         })
       );
@@ -263,75 +264,60 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const createWallet = async (name: string): Promise<Wallet> => {
-    if (!user) throw new Error('Usuário não autenticado');
+  const createWallet = async (name: string) => {
+    if (!user) return;
+    
+    try {
+      const walletRef = await addDoc(collection(db, 'wallets'), {
+        name,
+        userId: user.uid,
+        createdAt: new Date()
+      });
 
-    const newWallet = {
-      name,
-      userId: user.uid,
-      createdAt: new Date()
-    };
+      const newWallet = {
+        id: walletRef.id,
+        name,
+        userId: user.uid,
+        createdAt: new Date()
+      };
 
-    const docRef = await addDoc(collection(db, 'wallets'), newWallet);
-    return { id: docRef.id, ...newWallet };
+      setWallets(prev => [...prev, newWallet]);
+      return newWallet;
+    } catch (error) {
+      console.error('Erro ao criar carteira:', error);
+      throw error;
+    }
   };
 
   const updateWallet = async (id: string, name: string) => {
     if (!user) return;
-
-    try {
-      const walletRef = doc(db, 'wallets', id);
-      await updateDoc(walletRef, { name });
-      
-      // Atualizar estado local
-      setWallets(prev => prev.map(wallet => 
-        wallet.id === id ? { ...wallet, name } : wallet
-      ));
-    } catch (error) {
-      console.error('Erro ao atualizar carteira:', error);
-      throw error;
-    }
+    
+    const walletRef = doc(db, 'wallets', id);
+    await updateDoc(walletRef, { name });
+    
+    setWallets(prev => prev.map(wallet => 
+      wallet.id === id ? { ...wallet, name } : wallet
+    ));
   };
 
   const deleteWallet = async (id: string) => {
-    if (!user || wallets.length <= 1) {
-      throw new Error('Não é possível excluir a única carteira');
-    }
-
-    try {
-      await deleteDoc(doc(db, 'wallets', id));
-      
-      // Atualizar estado local
-      const updatedWallets = wallets.filter(w => w.id !== id);
-      setWallets(updatedWallets);
-
-      // Se a carteira excluída era a atual, selecionar outra
-      if (currentWallet?.id === id) {
-        setCurrentWalletState(updatedWallets[0]);
-      }
-    } catch (error) {
-      console.error('Erro ao excluir carteira:', error);
-      throw error;
+    if (!user) return;
+    
+    const walletRef = doc(db, 'wallets', id);
+    await deleteDoc(walletRef);
+    
+    setWallets(prev => prev.filter(wallet => wallet.id !== id));
+    if (currentWallet?.id === id) {
+      setCurrentWallet(null);
     }
   };
 
-  const setCurrentWallet = (wallet: Wallet) => {
-    setCurrentWalletState(wallet);
-    localStorage.setItem('currentWalletId', wallet.id);
-    
-    // Limpar dados ao trocar de carteira
-    setWallets([]);
-    setSharedWallets([]);
-    setPendingShares([]);
-    setActiveShares([]);
-    setSentPendingShares([]);
-    
-    // Recarregar dados da nova carteira
-    fetchWallets();
-    fetchSharedWallets();
-    fetchActiveShares();
-    fetchSentPendingShares();
-    fetchPendingShares();
+  const handleSwitchWallet = (walletId: string) => {
+    const wallet = [...wallets, ...sharedWallets].find(w => w.id === walletId);
+    if (wallet) {
+      setCurrentWallet(wallet);
+      localStorage.setItem('currentWalletId', wallet.id);
+    }
   };
 
   const shareWallet = async (walletId: string, email: string) => {
@@ -426,26 +412,23 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
   }
 
   return (
-    <WalletContext.Provider 
-      value={{ 
-        currentWallet, 
-        wallets, 
-        setCurrentWallet,
-        isLoading,
-        createWallet,
-        updateWallet,
-        deleteWallet,
-        shareWallet,
-        acceptShare,
-        rejectShare,
-        pendingShares,
-        sharedWallets,
-        activeShares,
-        removeShare,
-        sentPendingShares,
-        isSharedWallet,
-      }}
-    >
+    <WalletContext.Provider value={{
+      wallets,
+      sharedWallets,
+      currentWallet,
+      setCurrentWallet: handleSwitchWallet,
+      isSharedWallet: (walletId: string) => sharedWallets.some(w => w.id === walletId),
+      pendingShares,
+      activeShares,
+      sentPendingShares,
+      shareWallet,
+      acceptShare,
+      rejectShare,
+      removeShare,
+      createWallet,
+      updateWallet,
+      deleteWallet
+    }}>
       {children}
     </WalletContext.Provider>
   );
@@ -460,13 +443,13 @@ export function useWallet() {
 }
 
 function WalletSelector() {
-  const { currentWallet, setCurrentWallet, wallets, sharedWallets } = useWallet();
+  const { wallets, sharedWallets, currentWallet, setCurrentWallet } = useWallet();
   
   const handleWalletChange = (walletId: string) => {
     const allWallets = [...wallets, ...sharedWallets];
     const selectedWallet = allWallets.find(w => w.id === walletId);
     if (selectedWallet) {
-      setCurrentWallet(selectedWallet);
+      setCurrentWallet(selectedWallet.id);
     }
   };
 

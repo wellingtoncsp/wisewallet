@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAlerts } from '../contexts/AlertContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';

@@ -106,7 +106,7 @@ const getAlertMessage = (type: AlertType, data: any): { title: string; message: 
   }
 };
 
-export const AlertProvider = ({ children }: { children: React.ReactNode }) => {
+export const AlertProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -166,31 +166,32 @@ export const AlertProvider = ({ children }: { children: React.ReactNode }) => {
     if (!user) return;
 
     try {
-      if (await isDuplicateAlert(type, data)) {
-        return;
-      }
-
-      const { title, message, icon } = getAlertMessage(type, data);
-      const alertHash = generateAlertHash(type, data);
+      console.log('Criando alerta:', { type, data, walletId }); // Debug
 
       const newAlert = {
         type,
-        title,
-        message,
-        icon,
+        title: getAlertMessage(type, data).title,
+        message: getAlertMessage(type, data).message,
+        icon: getAlertMessage(type, data).icon,
         createdAt: new Date(),
         read: false,
-        userId: user.uid,
         walletId,
-        data,
-        alertHash
+        userId: user.uid,
+        data
       };
 
-      await addDoc(collection(db, 'alerts'), newAlert);
+      const docRef = await addDoc(collection(db, 'alerts'), newAlert);
+      console.log('Alerta criado com ID:', docRef.id); // Debug
+
+      // Atualizar a lista de alertas
       fetchAlerts(walletId);
       
       // Mostrar toast
-      setToast(newAlert);
+      setToast({
+        title: newAlert.title,
+        message: newAlert.message,
+        icon: newAlert.icon
+      });
     } catch (error) {
       console.error('Erro ao criar alerta:', error);
     }

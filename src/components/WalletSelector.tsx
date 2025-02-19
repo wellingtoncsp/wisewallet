@@ -5,11 +5,14 @@ import { ChevronDown, Wallet, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const WalletSelector = () => {
-  const { wallets, currentWallet, setCurrentWallet, sharedWallets, isSharedWallet } = useWallet();
+  const { wallets, sharedWallets, currentWallet, setCurrentWallet } = useWallet();
   const { user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
 
-  if (wallets.length <= 1) {
+  // Combinar todas as carteiras
+  const allWallets = [...wallets, ...sharedWallets];
+
+  if (allWallets.length <= 1) {
     return null;
   }
 
@@ -22,7 +25,7 @@ export const WalletSelector = () => {
         className="flex items-center space-x-2 p-2 sm:p-3 text-sm sm:text-base"
       >
         <div className="flex items-center">
-          {currentWallet?.id && isSharedWallet(currentWallet.id) ? (
+          {currentWallet?.shared ? (
             <Users className="h-5 w-5 text-purple-500" />
           ) : (
             <Wallet className="h-5 w-5 text-blue-500" />
@@ -35,13 +38,11 @@ export const WalletSelector = () => {
       </button>
 
       {isOpen && (
-        <div 
-          className={`
-            absolute w-48 sm:w-64 bg-white rounded-lg shadow-lg
-            ${window.innerWidth >= 640 ? 'bottom-full mb-2' : 'top-full mt-2'}
-            right-0
-          `}
-        >
+        <div className={`
+          absolute w-48 sm:w-64 bg-white rounded-lg shadow-lg
+          ${window.innerWidth >= 640 ? 'bottom-full mb-2' : 'top-full mt-2'}
+          right-0
+        `}>
           {/* Carteiras próprias */}
           <div className="px-4 py-1 text-xs font-semibold text-gray-500 uppercase">
             Minhas Carteiras
@@ -50,7 +51,7 @@ export const WalletSelector = () => {
             <button
               key={wallet.id}
               onClick={() => {
-                setCurrentWallet(wallet);
+                setCurrentWallet(wallet.id);
                 setIsOpen(false);
               }}
               className={`w-full flex items-center px-4 py-2 text-left hover:bg-gray-50 ${
@@ -72,7 +73,7 @@ export const WalletSelector = () => {
                 <button
                   key={wallet.id}
                   onClick={() => {
-                    setCurrentWallet(wallet);
+                    setCurrentWallet(wallet.id);
                     setIsOpen(false);
                   }}
                   className={`w-full flex items-center px-4 py-2 text-left hover:bg-gray-50 ${
